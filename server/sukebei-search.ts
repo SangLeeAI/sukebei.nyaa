@@ -20,6 +20,7 @@ export type Listing = {
   magnet: string | null
   torrent: string | null
   viewUrl: string
+  trusted: boolean
 }
 
 export type SearchResponse = {
@@ -122,6 +123,7 @@ export function parseSearchPage(html: string): Listing[] {
     const magnetHref = decodeHref(
       row.querySelector('a[href^="magnet:"]')?.getAttribute('href'),
     )
+    const trusted = /\bsuccess\b/.test(row.getAttribute('class') ?? '')
 
     items.push({
       id,
@@ -135,6 +137,7 @@ export function parseSearchPage(html: string): Listing[] {
       magnet: magnetHref,
       torrent: absUrl(torrentHref ?? undefined),
       viewUrl: absUrl(`/view/${id}`) ?? `${SUKEBEI_ORIGIN}/view/${id}`,
+      trusted,
     })
   }
 

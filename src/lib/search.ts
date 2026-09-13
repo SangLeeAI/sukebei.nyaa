@@ -10,6 +10,7 @@ export type Listing = {
   magnet: string | null
   torrent: string | null
   viewUrl: string
+  trusted: boolean
 }
 
 export type SearchResponse = {

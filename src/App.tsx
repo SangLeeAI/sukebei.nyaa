@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { categoryLabel } from '@/lib/categories'
 import { searchListings, type SearchResponse } from '@/lib/search'
 import { translateTexts } from '@/lib/translate'
+import { cn } from '@/lib/utils'
 
 const TRANSLATE_CHUNK = 20
 
@@ -298,12 +299,25 @@ export default function App() {
                         target="_blank"
                         rel="noreferrer"
                         title={item.title}
-                        className="font-medium leading-snug hover:underline"
+                        className={cn(
+                          'font-medium leading-snug hover:underline',
+                          item.trusted
+                            ? 'text-sukebei-trusted'
+                            : 'text-foreground',
+                        )}
                       >
                         {titleKo}
                       </a>
                       {showOriginal ? (
-                        <p className="break-all text-xs text-muted-foreground" title="원문">
+                        <p
+                          className={cn(
+                            'break-all text-xs',
+                            item.trusted
+                              ? 'text-sukebei-trusted'
+                              : 'text-muted-foreground',
+                          )}
+                          title="원문"
+                        >
                           {item.title}
                         </p>
                       ) : null}
