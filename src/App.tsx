@@ -1,135 +1,162 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ListTodo, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowDown,
+  ArrowUp,
+  Download,
+  LoaderCircle,
+  Magnet,
+  Search,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { categoryLabel } from '@/lib/categories'
+import { searchListings, type SearchResponse } from '@/lib/search'
 
-type Task = {
-  id: string
-  text: string
-  done: boolean
+function readQueryParam() {
+  const q = new URLSearchParams(window.location.search).get('q')
+  return q?.trim() ?? ''
 }
 
-const STORAGE_KEY = 'nyaa-today-tasks'
-
-function todayLabel() {
-  return new Date().toLocaleDateString('ko-KR', {
-    weekday: 'long',
+function formatDate(iso: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleString('ko-KR', {
     year: 'numeric',
-    month: 'long',
+    month: 'short',
     day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
-function loadTasks(): { tasks: Task[]; error: string | null } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      return { tasks: [], error: null }
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) {
-      return { tasks: [], error: null }
-    }
-    const tasks = parsed.filter(
-      (item): item is Task =>
-        typeof item === 'object' &&
-        item !== null &&
-        typeof (item as Task).id === 'string' &&
-        typeof (item as Task).text === 'string' &&
-        typeof (item as Task).done === 'boolean',
-    )
-    return { tasks, error: null }
-  } catch {
-    return {
-      tasks: [],
-      error: '저장한 목록을 읽지 못했어요. 브라우저가 로컬 저장소를 막았을 수 있어요.',
-    }
+function stoppedCopy(result: SearchResponse) {
+  if (result.stoppedReason === 'page-limit') {
+    return '공개 검색 페이지 한도에 닿아 여기서 멈췄어요. 검색어를 더 구체적으로 줄이면 최근 한 달을 빠짐없이 보기 쉬워요.'
   }
+  if (result.stoppedReason === 'window') {
+    return '약 30일보다 오래된 항목이 나와 여기서 멈췄어요.'
+  }
+  return '더 이상 다음 페이지가 없어요.'
 }
 
 export default function App() {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [draft, setDraft] = useState('')
-  const [ready, setReady] = useState(false)
+  const [draft, setDraft] = useState(readQueryParam)
+  const [result, setResult] = useState<SearchResponse | null>(null)
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [dateLabel] = useState(todayLabel)
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    const loaded = loadTasks()
-    setTasks(loaded.tasks)
-    setError(loaded.error)
-    setReady(true)
-  }, [])
+  const hasItems = (result?.items.length ?? 0) > 0
+  const summary = useMemo(() => {
+    if (!result) {
+      return null
+    }
+    return `${result.windowDays}일 · ${result.itemCount}건 · ${result.pagesFetched}페이지`
+  }, [result])
 
-  useEffect(() => {
-    if (!ready) {
+  async function runSearch(raw: string) {
+    const query = raw.trim()
+    if (!query) {
+      setError('검색어를 입력하세요.')
+      setStatus('error')
+      setResult(null)
       return
     }
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const next = new URL(window.location.href)
+    next.searchParams.set('q', query)
+    window.history.replaceState({}, '', `${next.pathname}?q=${encodeURIComponent(query)}`)
+
+    setStatus('loading')
+    setError(null)
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks))
-      setError(null)
-    } catch {
-      setError('지금 목록을 저장하지 못했어요. 시크릿 창이거나 저장 공간이 가득 찼을 수 있어요.')
+      const payload = await searchListings(query, controller.signal)
+      setResult(payload)
+      setStatus('idle')
+    } catch (cause) {
+      if (controller.signal.aborted) {
+        return
+      }
+      setResult(null)
+      setStatus('error')
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : '목록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.',
+      )
     }
-  }, [ready, tasks])
+  }
 
-  const remaining = useMemo(() => tasks.filter((task) => !task.done).length, [tasks])
-  const completed = tasks.length - remaining
-
-  function addTask() {
-    const text = draft.trim()
-    if (!text) {
-      return
+  useEffect(() => {
+    const initial = readQueryParam()
+    if (initial) {
+      void runSearch(initial)
     }
-    setTasks((current) => [
-      { id: crypto.randomUUID(), text, done: false },
-      ...current,
-    ])
-    setDraft('')
-  }
-
-  function toggleTask(id: string, done: boolean) {
-    setTasks((current) =>
-      current.map((task) => (task.id === id ? { ...task, done } : task)),
-    )
-  }
-
-  function removeTask(id: string) {
-    setTasks((current) => current.filter((task) => task.id !== id))
-  }
-
-  function clearCompleted() {
-    setTasks((current) => current.filter((task) => !task.done))
-  }
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
 
   return (
     <div className="min-h-svh bg-muted/40">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 md:px-6 md:py-12">
-        <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:px-6 md:py-10">
+        <header className="space-y-4">
           <div className="space-y-2">
             <p className="text-sm font-medium text-primary">Nyaa</p>
             <h1 className="font-heading text-3xl tracking-tight md:text-4xl">
-              오늘의 할 일
+              sukebei 검색
             </h1>
-            <p className="max-w-xl text-sm text-muted-foreground md:text-base">
-              짧게 적고, 끝나면 체크하세요. 할 일은 이 브라우저에만 저장되고 서버로는
-              나가지 않습니다.
+            <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
+              사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 공개 검색으로 최근 약
+              30일 결과를 모읍니다.
             </p>
           </div>
-          <p className="text-sm text-muted-foreground md:text-right">{dateLabel}</p>
+
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void runSearch(draft)
+            }}
+          >
+            <label className="sr-only" htmlFor="nyaa-query">
+              검색어
+            </label>
+            <Input
+              id="nyaa-query"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="sukebei.nyaa.si와 같은 검색어"
+              className="h-12 text-base"
+              autoComplete="off"
+              autoFocus
+              disabled={status === 'loading'}
+            />
+            <Button
+              type="submit"
+              size="lg"
+              className="h-12 px-5 sm:w-auto"
+              disabled={status === 'loading'}
+            >
+              {status === 'loading' ? (
+                <LoaderCircle className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <Search data-icon="inline-start" />
+              )}
+              검색
+            </Button>
+          </form>
         </header>
 
-        {error ? (
+        {status === 'error' && error ? (
           <p
             role="alert"
             className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
@@ -138,118 +165,101 @@ export default function App() {
           </p>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(16rem,0.9fr)]">
-          <Card className="bg-card">
-            <CardHeader className="border-b">
-              <CardTitle>할 일 추가</CardTitle>
-              <CardDescription>
-                한 줄이면 충분해요. 엔터를 눌러도 추가됩니다.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <form
-                className="flex flex-col gap-2 sm:flex-row"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  addTask()
-                }}
-              >
-                <label className="sr-only" htmlFor="task-input">
-                  할 일
-                </label>
-                <Input
-                  id="task-input"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder="예: 장 보고, 저녁 준비하기"
-                  className="h-11 text-base md:h-9"
-                  autoComplete="off"
-                />
-                <Button type="submit" size="lg" className="h-11 sm:h-9 sm:px-4">
-                  <Plus data-icon="inline-start" />
-                  추가
-                </Button>
-              </form>
+        {status === 'loading' ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed bg-card px-4 py-16 text-center">
+            <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+            <p className="font-medium">목록을 불러오는 중…</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              최신 페이지부터 순서대로 확인하고, 약 30일보다 오래된 항목이 나오면
+              멈춥니다.
+            </p>
+          </div>
+        ) : null}
 
-              {!ready ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">
-                  목록을 불러오는 중…
-                </p>
-              ) : tasks.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-10 text-center">
-                  <ListTodo className="size-8 text-muted-foreground" />
-                  <p className="font-medium">아직 할 일이 없어요</p>
-                  <p className="max-w-sm text-sm text-muted-foreground">
-                    위에 첫 할 일을 적어 보세요. 새로고침해도 이 컴퓨터의 브라우저에
-                    남습니다.
-                  </p>
-                </div>
-              ) : (
-                <ul className="divide-y rounded-xl border">
-                  {tasks.map((task) => (
-                    <li
-                      key={task.id}
-                      className="flex items-start gap-3 px-3 py-3 sm:items-center"
-                    >
-                      <Checkbox
-                        checked={task.done}
-                        onCheckedChange={(value) =>
-                          toggleTask(task.id, value === true)
-                        }
-                        aria-label={`${task.text} 완료 여부`}
-                        className="mt-1 sm:mt-0"
-                      />
-                      <span
-                        className={
-                          task.done
-                            ? 'min-w-0 flex-1 text-sm text-muted-foreground line-through'
-                            : 'min-w-0 flex-1 text-sm'
-                        }
-                      >
-                        {task.text}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`${task.text} 삭제`}
-                        onClick={() => removeTask(task.id)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+        {status !== 'loading' && status !== 'error' && !result ? (
+          <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
+            <Search className="mx-auto mb-3 size-8 text-muted-foreground" />
+            <p className="font-medium">검색어를 입력하세요</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              예: 작품명, 제작사, 숫자 코드. 결과는 이 컴퓨터의 개발 서버가
+              sukebei.nyaa.si 공개 검색을 대신 요청합니다.
+            </p>
+          </div>
+        ) : null}
 
-          <Card className="h-fit bg-card">
-            <CardHeader>
-              <CardTitle>오늘 요약</CardTitle>
-              <CardDescription>남은 일과 끝낸 일을 한눈에 보세요.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Badge variant="secondary">남은 일 {remaining}개</Badge>
-              <Badge variant="outline">완료 {completed}개</Badge>
-              <Badge variant="ghost">전체 {tasks.length}개</Badge>
-            </CardContent>
-            <CardFooter className="justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                끝낸 항목만 지울 수 있어요.
+        {status !== 'loading' && result && !hasItems ? (
+          <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
+            <p className="font-medium">최근 30일 안에 맞는 결과가 없어요</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              “{result.query}”에 해당하는 최신 글이 없거나, 모두 한 달보다 오래됐어요.
+              다른 검색어를 시도해 보세요.
+            </p>
+          </div>
+        ) : null}
+
+        {status !== 'loading' && result && hasItems ? (
+          <section className="space-y-3">
+            <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="font-heading text-lg">
+                  “{result.query}” 최근 {result.windowDays}일
+                </h2>
+                <p className="text-sm text-muted-foreground">{summary}</p>
+              </div>
+              <p className="text-xs text-muted-foreground md:max-w-sm md:text-right">
+                {stoppedCopy(result)}
               </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={completed === 0}
-                onClick={clearCompleted}
-              >
-                완료 항목 지우기
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
+            </div>
+
+            <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+              {result.items.map((item) => (
+                <li key={item.id} className="flex flex-col gap-3 p-4 md:flex-row md:items-start">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <a
+                      href={item.viewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium leading-snug hover:underline"
+                    >
+                      {item.title}
+                    </a>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                      <Badge variant="secondary">{categoryLabel(item.category)}</Badge>
+                      <span>{formatDate(item.date)}</span>
+                      <span>{item.size || '용량 없음'}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <ArrowUp className="size-3.5" />
+                        시드 {item.seeders}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <ArrowDown className="size-3.5" />
+                        리치 {item.leechers}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {item.magnet ? (
+                      <Button asChild variant="outline" size="sm">
+                        <a href={item.magnet}>
+                          <Magnet data-icon="inline-start" />
+                          마그넷
+                        </a>
+                      </Button>
+                    ) : null}
+                    {item.torrent ? (
+                      <Button asChild variant="outline" size="sm">
+                        <a href={item.torrent}>
+                          <Download data-icon="inline-start" />
+                          토렌트
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </div>
   )
