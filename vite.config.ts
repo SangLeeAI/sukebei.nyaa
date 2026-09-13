@@ -6,12 +6,9 @@ import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import { SearchError, searchRecentListings } from './server/sukebei-search.ts'
 import {
-  buildTorrentZip,
   contentDisposition,
   fetchTorrentFile,
   parseTorrentId,
-  parseZipIdsParam,
-  parseZipItems,
 } from './server/sukebei-torrent.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
@@ -136,46 +133,6 @@ function localApiPlugin(): Plugin {
               cause instanceof Error
                 ? cause.message
                 : '토렌트 파일을 받지 못했어요.'
-            sendJson(res, status, { error: message })
-          }
-          return
-        }
-
-        if (url.pathname === '/api/torrents.zip') {
-          if (req.method !== 'GET' && req.method !== 'POST') {
-            res.statusCode = 405
-            res.setHeader('Allow', 'GET, POST')
-            res.end()
-            return
-          }
-
-          const controller = new AbortController()
-          req.on('aborted', () => controller.abort())
-
-          try {
-            const items =
-              req.method === 'GET'
-                ? parseZipIdsParam(url.searchParams.get('ids'))
-                : parseZipItems(JSON.parse((await readBody(req)) || '{}'))
-            const zip = await buildTorrentZip(items, controller.signal)
-            sendFile(res, zip.body, {
-              'Content-Type': 'application/zip',
-              'Content-Disposition': contentDisposition('sukebei-torrents.zip'),
-              'Content-Length': String(zip.body.byteLength),
-              'X-Nyaa-Saved': String(zip.saved),
-              'X-Nyaa-Skipped': String(zip.skipped),
-            })
-          } catch (cause) {
-            if (controller.signal.aborted) {
-              res.statusCode = 499
-              res.end()
-              return
-            }
-            const status = cause instanceof SearchError ? cause.status : 500
-            const message =
-              cause instanceof Error
-                ? cause.message
-                : '토렌트 zip을 만들지 못했어요.'
             sendJson(res, status, { error: message })
           }
           return

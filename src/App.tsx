@@ -153,11 +153,16 @@ export default function App() {
     setDownloadNote(
       items.length === 1
         ? '토렌트 파일을 받는 중…'
-        : `${items.length}개 토렌트를 zip으로 묶는 중…`,
+        : `토렌트 파일을 하나씩 받는 중… 0/${items.length}`,
     )
 
     try {
-      const outcome = await downloadSelectedTorrents(items, controller.signal)
+      const outcome = await downloadSelectedTorrents(items, {
+        signal: controller.signal,
+        onProgress: (done, total) => {
+          setDownloadNote(`토렌트 파일을 하나씩 받는 중… ${done}/${total}`)
+        },
+      })
       if (controller.signal.aborted) {
         return
       }
@@ -169,7 +174,7 @@ export default function App() {
         setDownloadNote(
           outcome.saved === 1
             ? '토렌트 파일 1개를 저장했어요.'
-            : `토렌트 파일 ${outcome.saved}개를 zip으로 저장했어요.`,
+            : `토렌트 파일 ${outcome.saved}개를 각각 저장했어요.`,
         )
       }
     } catch (cause) {
@@ -513,7 +518,7 @@ export default function App() {
               </Button>
               <p className="text-xs text-muted-foreground sm:ml-auto sm:max-w-md sm:text-right">
                 {downloadNote ??
-                  '기본은 선택 안 됨. 체크한 글만 sukebei 토렌트 파일을 받습니다. 여러 개는 zip입니다.'}
+                  '기본은 선택 안 됨. 체크한 글만 .torrent 파일로 하나씩 받습니다.'}
               </p>
             </div>
 
