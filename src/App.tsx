@@ -9,13 +9,15 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { categoryLabel } from '@/lib/categories'
-import { searchListings, type SearchResponse } from '@/lib/search'
+import { searchListings, type Listing, type SearchResponse } from '@/lib/search'
 import {
   resolveSince,
   todayYmd,
 } from '@/lib/since'
+import { downloadSelectedTorrents } from '@/lib/torrents'
 import { translateTexts } from '@/lib/translate'
 import { cn } from '@/lib/utils'
 
@@ -80,8 +82,12 @@ export default function App() {
   const [translating, setTranslating] = useState(false)
   const [seedDraft, setSeedDraft] = useState(String(DEFAULT_MIN_SEEDERS))
   const [sinceDraft, setSinceDraft] = useState(readSinceParam)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [downloading, setDownloading] = useState(false)
+  const [downloadNote, setDownloadNote] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
+  const downloadAbortRef = useRef<AbortController | null>(null)
   const minSeeders = parseMinSeeders(seedDraft)
 
   const fetchedItems = result?.items ?? []
@@ -91,6 +97,13 @@ export default function App() {
   )
   const hasFetchedItems = fetchedItems.length > 0
   const hasVisibleItems = visibleItems.length > 0
+  const selectedItems = useMemo(
+    () => visibleItems.filter((item) => selected.has(item.id)),
+    [selected, visibleItems],
+  )
+  const selectedCount = selectedItems.length
+  const allVisibleSelected =
+    hasVisibleItems && visibleItems.every((item) => selected.has(item.id))
   const summary = useMemo(() => {
     if (!result) {
       return null
@@ -101,6 +114,80 @@ export default function App() {
     return `${result.since}–오늘 · ${visibleItems.length}건 표시 · 전체 ${result.itemCount}건 · 시드 ${minSeeders}↑`
   }, [minSeeders, result, visibleItems.length])
 
+  function clearSelection() {
+    setSelected(new Set())
+  }
+
+  function selectAllVisible() {
+    setSelected(new Set(visibleItems.map((item) => item.id)))
+    setDownloadNote(null)
+  }
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (checked) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
+      return next
+    })
+    setDownloadNote(null)
+  }
+
+  async function downloadChecked() {
+    if (selectedCount === 0 || downloading) {
+      return
+    }
+
+    const items = selectedItems
+    if (items.length === 0) {
+      return
+    }
+
+    downloadAbortRef.current?.abort()
+    const controller = new AbortController()
+    downloadAbortRef.current = controller
+    setDownloading(true)
+    setDownloadNote(
+      items.length === 1
+        ? '토렌트 파일을 받는 중…'
+        : `${items.length}개 토렌트를 zip으로 묶는 중…`,
+    )
+
+    try {
+      const outcome = await downloadSelectedTorrents(items, controller.signal)
+      if (controller.signal.aborted) {
+        return
+      }
+      if (outcome.skipped > 0) {
+        setDownloadNote(
+          `${outcome.saved}개 토렌트를 저장했어요. ${outcome.skipped}개는 파일이 없어 건너뛰었어요.`,
+        )
+      } else {
+        setDownloadNote(
+          outcome.saved === 1
+            ? '토렌트 파일 1개를 저장했어요.'
+            : `토렌트 파일 ${outcome.saved}개를 zip으로 저장했어요.`,
+        )
+      }
+    } catch (cause) {
+      if (controller.signal.aborted) {
+        return
+      }
+      setDownloadNote(
+        cause instanceof Error
+          ? cause.message
+          : '토렌트 파일을 받지 못했어요.',
+      )
+    } finally {
+      if (!controller.signal.aborted) {
+        setDownloading(false)
+      }
+    }
+  }
+
   async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
     const query = raw.trim()
     if (!query) {
@@ -108,11 +195,13 @@ export default function App() {
       setStatus('error')
       setResult(null)
       setTranslated({})
+      clearSelection()
       return
     }
 
     abortRef.current?.abort()
     translateAbortRef.current?.abort()
+    downloadAbortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -129,6 +218,9 @@ export default function App() {
     setError(null)
     setTranslated({})
     setTranslating(false)
+    clearSelection()
+    setDownloadNote(null)
+    setDownloading(false)
 
     try {
       const payload = await searchListings(query, sinceValue, controller.signal)
@@ -156,6 +248,7 @@ export default function App() {
     return () => {
       abortRef.current?.abort()
       translateAbortRef.current?.abort()
+      downloadAbortRef.current?.abort()
     }
   }, [])
 
@@ -379,86 +472,157 @@ export default function App() {
               </p>
             </div>
 
+            <div className="flex flex-col gap-2 rounded-xl border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="select-all"
+                onClick={selectAllVisible}
+                disabled={!hasVisibleItems || allVisibleSelected || downloading}
+              >
+                전체 선택
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="deselect-all"
+                onClick={() => {
+                  clearSelection()
+                  setDownloadNote(null)
+                }}
+                disabled={selectedCount === 0 || downloading}
+              >
+                선택 해제
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="download-selected"
+                onClick={() => void downloadChecked()}
+                disabled={selectedCount === 0 || downloading}
+              >
+                {downloading ? (
+                  <LoaderCircle className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <Download data-icon="inline-start" />
+                )}
+                선택한 토렌트 받기
+                {selectedCount > 0 ? ` (${selectedCount})` : ''}
+              </Button>
+              <p className="text-xs text-muted-foreground sm:ml-auto sm:max-w-md sm:text-right">
+                {downloadNote ??
+                  '기본은 선택 안 됨. 체크한 글만 sukebei 토렌트 파일을 받습니다. 여러 개는 zip입니다.'}
+              </p>
+            </div>
+
             <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-              {visibleItems.map((item) => {
-                const titleKo = translated[item.title] ?? item.title
-                const showOriginal = titleKo !== item.title
-                const categoryKo =
-                  translated[item.category] ?? categoryLabel(item.category)
-                return (
-                  <li
-                    key={item.id}
-                    className="flex flex-col gap-3 p-4 md:flex-row md:items-start"
-                  >
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <a
-                        href={item.viewUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={item.title}
-                        className={cn(
-                          'font-medium leading-snug hover:underline',
-                          item.trusted
-                            ? 'text-sukebei-trusted'
-                            : 'text-foreground',
-                        )}
-                      >
-                        {titleKo}
-                      </a>
-                      {showOriginal ? (
-                        <p
-                          className={cn(
-                            'break-all text-xs',
-                            item.trusted
-                              ? 'text-sukebei-trusted'
-                              : 'text-muted-foreground',
-                          )}
-                          title="원문"
-                        >
-                          {item.title}
-                        </p>
-                      ) : null}
-                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        <Badge variant="secondary" title={item.category}>
-                          {categoryKo}
-                        </Badge>
-                        <span>{formatDate(item.date)}</span>
-                        <span>{item.size || '용량 없음'}</span>
-                        <span className="inline-flex items-center gap-1">
-                          <ArrowUp className="size-3.5" />
-                          시드 {item.seeders}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <ArrowDown className="size-3.5" />
-                          리치 {item.leechers}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      {item.magnet ? (
-                        <Button asChild variant="outline" size="sm">
-                          <a href={item.magnet} title={item.title}>
-                            <Magnet data-icon="inline-start" />
-                            마그넷
-                          </a>
-                        </Button>
-                      ) : null}
-                      {item.torrent ? (
-                        <Button asChild variant="outline" size="sm">
-                          <a href={item.torrent} title={item.title}>
-                            <Download data-icon="inline-start" />
-                            토렌트
-                          </a>
-                        </Button>
-                      ) : null}
-                    </div>
-                  </li>
-                )
-              })}
+              {visibleItems.map((item) => (
+                <ResultRow
+                  key={item.id}
+                  item={item}
+                  titleKo={translated[item.title] ?? item.title}
+                  categoryKo={
+                    translated[item.category] ?? categoryLabel(item.category)
+                  }
+                  checked={selected.has(item.id)}
+                  onCheckedChange={(checked) => toggleSelected(item.id, checked)}
+                />
+              ))}
             </ul>
           </section>
         ) : null}
       </div>
     </div>
+  )
+}
+
+function ResultRow({
+  item,
+  titleKo,
+  categoryKo,
+  checked,
+  onCheckedChange,
+}: {
+  item: Listing
+  titleKo: string
+  categoryKo: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  const showOriginal = titleKo !== item.title
+  return (
+    <li className="flex flex-col gap-3 p-4 md:flex-row md:items-start">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <Checkbox
+          data-testid={`row-checkbox-${item.id}`}
+          checked={checked}
+          onCheckedChange={(value) => onCheckedChange(value === true)}
+          aria-label={`${titleKo} 선택`}
+          className="mt-1"
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <a
+            href={item.viewUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={item.title}
+            className={cn(
+              'font-medium leading-snug hover:underline',
+              item.trusted ? 'text-sukebei-trusted' : 'text-foreground',
+            )}
+          >
+            {titleKo}
+          </a>
+          {showOriginal ? (
+            <p
+              className={cn(
+                'break-all text-xs',
+                item.trusted
+                  ? 'text-sukebei-trusted'
+                  : 'text-muted-foreground',
+              )}
+              title="원문"
+            >
+              {item.title}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant="secondary" title={item.category}>
+              {categoryKo}
+            </Badge>
+            <span>{formatDate(item.date)}</span>
+            <span>{item.size || '용량 없음'}</span>
+            <span className="inline-flex items-center gap-1">
+              <ArrowUp className="size-3.5" />
+              시드 {item.seeders}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <ArrowDown className="size-3.5" />
+              리치 {item.leechers}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-2 pl-7 md:pl-0">
+        {item.magnet ? (
+          <Button asChild variant="outline" size="sm">
+            <a href={item.magnet} title={item.title}>
+              <Magnet data-icon="inline-start" />
+              마그넷
+            </a>
+          </Button>
+        ) : null}
+        {item.torrent ? (
+          <Button asChild variant="outline" size="sm">
+            <a href={item.torrent} title={item.title}>
+              <Download data-icon="inline-start" />
+              토렌트
+            </a>
+          </Button>
+        ) : null}
+      </div>
+    </li>
   )
 }

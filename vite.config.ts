@@ -5,6 +5,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import { SearchError, searchRecentListings } from './server/sukebei-search.ts'
+import {
+  buildTorrentZip,
+  contentDisposition,
+  fetchTorrentFile,
+  parseTorrentId,
+  parseZipIdsParam,
+  parseZipItems,
+} from './server/sukebei-torrent.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -13,6 +21,21 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
   res.setHeader('Cache-Control', 'no-store')
   res.end(JSON.stringify(payload))
 }
+
+function sendFile(
+  res: ServerResponse,
+  body: Buffer,
+  headers: Record<string, string>,
+) {
+  res.statusCode = 200
+  for (const [key, value] of Object.entries(headers)) {
+    res.setHeader(key, value)
+  }
+  res.setHeader('Cache-Control', 'no-store')
+  res.end(body)
+}
+
+const TORRENT_PATH = /^\/api\/torrent\/([^/]+)$/
 
 function readBody(req: IncomingMessage) {
   return new Promise<string>((resolve, reject) => {
@@ -70,6 +93,89 @@ function localApiPlugin(): Plugin {
               cause instanceof Error
                 ? cause.message
                 : '검색 중 알 수 없는 오류가 났어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        const torrentMatch = TORRENT_PATH.exec(url.pathname)
+        if (torrentMatch) {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'GET')
+            res.end()
+            return
+          }
+
+          const id = parseTorrentId(
+            decodeURIComponent(torrentMatch[1]).replace(/\.torrent$/i, ''),
+          )
+          if (!id) {
+            sendJson(res, 400, { error: '토렌트 번호가 올바르지 않아요.' })
+            return
+          }
+
+          const controller = new AbortController()
+          req.on('aborted', () => controller.abort())
+
+          try {
+            const body = await fetchTorrentFile(id, controller.signal)
+            sendFile(res, body, {
+              'Content-Type': 'application/x-bittorrent',
+              'Content-Disposition': contentDisposition(`${id}.torrent`),
+              'Content-Length': String(body.byteLength),
+            })
+          } catch (cause) {
+            if (controller.signal.aborted) {
+              res.statusCode = 499
+              res.end()
+              return
+            }
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '토렌트 파일을 받지 못했어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/torrents.zip') {
+          if (req.method !== 'GET' && req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'GET, POST')
+            res.end()
+            return
+          }
+
+          const controller = new AbortController()
+          req.on('aborted', () => controller.abort())
+
+          try {
+            const items =
+              req.method === 'GET'
+                ? parseZipIdsParam(url.searchParams.get('ids'))
+                : parseZipItems(JSON.parse((await readBody(req)) || '{}'))
+            const zip = await buildTorrentZip(items, controller.signal)
+            sendFile(res, zip.body, {
+              'Content-Type': 'application/zip',
+              'Content-Disposition': contentDisposition('sukebei-torrents.zip'),
+              'Content-Length': String(zip.body.byteLength),
+              'X-Nyaa-Saved': String(zip.saved),
+              'X-Nyaa-Skipped': String(zip.skipped),
+            })
+          } catch (cause) {
+            if (controller.signal.aborted) {
+              res.statusCode = 499
+              res.end()
+              return
+            }
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '토렌트 zip을 만들지 못했어요.'
             sendJson(res, status, { error: message })
           }
           return
