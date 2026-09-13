@@ -204,9 +204,10 @@ export async function searchRecentListings(
     const html = await fetchSearchPage(query, page, signal)
     pagesFetched += 1
     const pageItems = parseSearchPage(html)
+    const siteCapped = /out of 1000 results/i.test(html)
 
     if (pageItems.length === 0) {
-      stoppedReason = 'no-more'
+      stoppedReason = siteCapped ? 'page-limit' : 'no-more'
       break
     }
 
@@ -225,7 +226,7 @@ export async function searchRecentListings(
     }
 
     if (pageItems.length < PAGE_SIZE) {
-      stoppedReason = 'no-more'
+      stoppedReason = siteCapped ? 'page-limit' : 'no-more'
       break
     }
 
