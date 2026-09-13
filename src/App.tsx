@@ -153,28 +153,42 @@ export default function App() {
     setDownloadNote(
       items.length === 1
         ? '토렌트 파일을 받는 중…'
-        : `토렌트 파일을 하나씩 받는 중… 0/${items.length}`,
+        : '저장할 폴더를 고르면 토렌트 파일을 각각 넣습니다…',
     )
 
     try {
       const outcome = await downloadSelectedTorrents(items, {
         signal: controller.signal,
         onProgress: (done, total) => {
-          setDownloadNote(`토렌트 파일을 하나씩 받는 중… ${done}/${total}`)
+          setDownloadNote(`선택한 폴더에 저장하는 중… ${done}/${total}`)
         },
       })
       if (controller.signal.aborted) {
         return
       }
+      if (outcome.cancelled) {
+        setDownloadNote('저장을 취소했어요.')
+        return
+      }
       if (outcome.skipped > 0) {
         setDownloadNote(
-          `${outcome.saved}개 토렌트를 저장했어요. ${outcome.skipped}개는 파일이 없어 건너뛰었어요.`,
+          `${outcome.saved}개 토렌트를 저장했어요. ${outcome.skipped}개는 파일이 없어 건너뛰었어요.${
+            outcome.directory ? ` (${outcome.directory})` : ''
+          }`,
+        )
+      } else if (outcome.method === 'downloads' && outcome.directory) {
+        setDownloadNote(
+          `토렌트 파일 ${outcome.saved}개를 ${outcome.directory}에 저장했어요.`,
+        )
+      } else if (outcome.method === 'folder') {
+        setDownloadNote(
+          `토렌트 파일 ${outcome.saved}개를 선택한 폴더에 저장했어요.`,
         )
       } else {
         setDownloadNote(
           outcome.saved === 1
             ? '토렌트 파일 1개를 저장했어요.'
-            : `토렌트 파일 ${outcome.saved}개를 각각 저장했어요.`,
+            : `토렌트 파일 ${outcome.saved}개를 저장했어요.`,
         )
       }
     } catch (cause) {
@@ -518,7 +532,7 @@ export default function App() {
               </Button>
               <p className="text-xs text-muted-foreground sm:ml-auto sm:max-w-md sm:text-right">
                 {downloadNote ??
-                  '기본은 선택 안 됨. 체크한 글만 .torrent 파일로 하나씩 받습니다.'}
+                  '기본은 선택 안 됨. 여러 개를 받으면 폴더를 한 번만 고르고, 그 안에 .torrent을 각각 저장합니다.'}
               </p>
             </div>
 

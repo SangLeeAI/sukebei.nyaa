@@ -10,6 +10,7 @@ import {
   fetchTorrentFile,
   parseTorrentId,
 } from './server/sukebei-torrent.ts'
+import { parseSaveItems, saveTorrentsToDownloads } from './server/save-torrents.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -133,6 +134,37 @@ function localApiPlugin(): Plugin {
               cause instanceof Error
                 ? cause.message
                 : '토렌트 파일을 받지 못했어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/torrents/save') {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'POST')
+            res.end()
+            return
+          }
+
+          const controller = new AbortController()
+          req.on('aborted', () => controller.abort())
+
+          try {
+            const items = parseSaveItems(JSON.parse((await readBody(req)) || '{}'))
+            const result = await saveTorrentsToDownloads(items, controller.signal)
+            sendJson(res, 200, result)
+          } catch (cause) {
+            if (controller.signal.aborted) {
+              res.statusCode = 499
+              res.end()
+              return
+            }
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '토렌트 파일을 저장하지 못했어요.'
             sendJson(res, status, { error: message })
           }
           return
