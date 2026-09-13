@@ -15,18 +15,22 @@ export type Listing = {
 
 export type SearchResponse = {
   query: string
-  windowDays: number
+  since: string
   pagesFetched: number
   itemCount: number
   items: Listing[]
   stoppedReason: 'window' | 'no-more' | 'page-limit'
 }
 
-export async function searchListings(query: string, signal?: AbortSignal) {
-  const response = await fetch(
-    `/api/search?q=${encodeURIComponent(query)}`,
-    { signal },
-  )
+export async function searchListings(
+  query: string,
+  since: string,
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ q: query, since })
+  const response = await fetch(`/api/search?${params.toString()}`, {
+    signal,
+  })
   const payload: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {

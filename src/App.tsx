@@ -12,6 +12,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { categoryLabel } from '@/lib/categories'
 import { searchListings, type SearchResponse } from '@/lib/search'
+import {
+  resolveSince,
+  todayYmd,
+} from '@/lib/since'
 import { translateTexts } from '@/lib/translate'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +25,10 @@ const DEFAULT_MIN_SEEDERS = 3
 function readQueryParam() {
   const q = new URLSearchParams(window.location.search).get('q')
   return q?.trim() ?? ''
+}
+
+function readSinceParam() {
+  return resolveSince(new URLSearchParams(window.location.search).get('since'))
 }
 
 function parseMinSeeders(raw: string) {
@@ -55,10 +63,10 @@ function formatDate(iso: string) {
 
 function stoppedCopy(result: SearchResponse) {
   if (result.stoppedReason === 'page-limit') {
-    return '공개 검색 페이지 한도에 닿아 여기서 멈췄어요. 검색어를 더 구체적으로 줄이면 최근 한 달을 빠짐없이 보기 쉬워요.'
+    return '공개 검색 페이지 한도에 닿아 여기서 멈췄어요. 검색어를 더 구체적으로 줄이면 빠짐없이 보기 쉬워요.'
   }
   if (result.stoppedReason === 'window') {
-    return '약 30일보다 오래된 항목이 나와 여기서 멈췄어요.'
+    return `${result.since}보다 오래된 항목이 나와 여기서 멈췄어요.`
   }
   return '더 이상 다음 페이지가 없어요.'
 }
@@ -71,6 +79,7 @@ export default function App() {
   const [translated, setTranslated] = useState<Record<string, string>>({})
   const [translating, setTranslating] = useState(false)
   const [seedDraft, setSeedDraft] = useState(String(DEFAULT_MIN_SEEDERS))
+  const [sinceDraft, setSinceDraft] = useState(readSinceParam)
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const minSeeders = parseMinSeeders(seedDraft)
@@ -87,12 +96,12 @@ export default function App() {
       return null
     }
     if (visibleItems.length === result.itemCount) {
-      return `${result.windowDays}일 · ${visibleItems.length}건 · ${result.pagesFetched}페이지 · 시드 ${minSeeders}↑`
+      return `${result.since}–오늘 · ${visibleItems.length}건 · ${result.pagesFetched}페이지 · 시드 ${minSeeders}↑`
     }
-    return `${result.windowDays}일 · ${visibleItems.length}건 표시 · 전체 ${result.itemCount}건 · 시드 ${minSeeders}↑`
+    return `${result.since}–오늘 · ${visibleItems.length}건 표시 · 전체 ${result.itemCount}건 · 시드 ${minSeeders}↑`
   }, [minSeeders, result, visibleItems.length])
 
-  async function runSearch(raw: string) {
+  async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
     const query = raw.trim()
     if (!query) {
       setError('검색어를 입력하세요.')
@@ -109,7 +118,12 @@ export default function App() {
 
     const next = new URL(window.location.href)
     next.searchParams.set('q', query)
-    window.history.replaceState({}, '', `${next.pathname}?q=${encodeURIComponent(query)}`)
+    next.searchParams.set('since', sinceValue)
+    window.history.replaceState(
+      {},
+      '',
+      `${next.pathname}?${next.searchParams.toString()}`,
+    )
 
     setStatus('loading')
     setError(null)
@@ -117,7 +131,7 @@ export default function App() {
     setTranslating(false)
 
     try {
-      const payload = await searchListings(query, controller.signal)
+      const payload = await searchListings(query, sinceValue, controller.signal)
       setResult(payload)
       setStatus('idle')
     } catch (cause) {
@@ -212,8 +226,8 @@ export default function App() {
               sukebei 검색
             </h1>
             <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-              사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 공개 검색으로 최근 약
-              30일 결과를 모으고, 제목은 한국어로 옮겨 보여 줍니다.
+              사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 시작일부터 오늘까지
+              공개 검색으로 모으고, 제목은 한국어로 옮겨 보여 줍니다.
             </p>
           </div>
 
@@ -237,6 +251,30 @@ export default function App() {
               autoFocus
               disabled={status === 'loading'}
             />
+            <div className="flex h-12 shrink-0 items-center gap-2 rounded-lg border border-input px-3 sm:w-auto">
+              <label
+                htmlFor="since-date"
+                className="shrink-0 text-sm font-medium text-muted-foreground"
+              >
+                시작일
+              </label>
+              <Input
+                id="since-date"
+                type="date"
+                max={todayYmd()}
+                value={sinceDraft}
+                onChange={(event) => {
+                  const next = resolveSince(event.target.value)
+                  setSinceDraft(next)
+                  if (draft.trim()) {
+                    void runSearch(draft, next)
+                  }
+                }}
+                aria-label="검색 시작일"
+                className="h-11 w-[11.5rem] border-0 bg-transparent px-0 text-base shadow-none focus-visible:ring-0 md:text-sm"
+                disabled={status === 'loading'}
+              />
+            </div>
             <div className="flex h-12 shrink-0 items-center gap-2 rounded-lg border border-input px-3 sm:w-32">
               <label
                 htmlFor="min-seeders"
@@ -288,7 +326,7 @@ export default function App() {
             <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
             <p className="font-medium">목록을 불러오는 중…</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              최신 페이지부터 순서대로 확인하고, 약 30일보다 오래된 항목이 나오면
+              최신 페이지부터 순서대로 확인하고, 시작일보다 오래된 항목이 나오면
               멈춥니다.
             </p>
           </div>
@@ -307,10 +345,10 @@ export default function App() {
 
         {status !== 'loading' && result && !hasFetchedItems ? (
           <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
-            <p className="font-medium">최근 30일 안에 맞는 결과가 없어요</p>
+            <p className="font-medium">시작일 이후 맞는 결과가 없어요</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-              “{result.query}”에 해당하는 최신 글이 없거나, 모두 한 달보다 오래됐어요.
-              다른 검색어를 시도해 보세요.
+              “{result.query}”에 해당하는 글이 {result.since}부터 오늘 사이에 없거나,
+              더 오래됐어요. 시작일을 앞당기거나 다른 검색어를 시도해 보세요.
             </p>
           </div>
         ) : null}
@@ -319,7 +357,7 @@ export default function App() {
           <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
             <p className="font-medium">시드 {minSeeders}개 이상인 항목이 없어요</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-              최근 30일 결과 {result.itemCount}건 가운데 시드가 {minSeeders} 이상인 글이
+              최근 {result.itemCount}건 가운데 시드가 {minSeeders} 이상인 글이
               없습니다. 시드 숫자를 낮춰 보세요.
             </p>
           </div>
@@ -330,7 +368,7 @@ export default function App() {
             <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
               <div>
                 <h2 className="font-heading text-lg">
-                  “{result.query}” 최근 {result.windowDays}일
+                  “{result.query}” {result.since} – 오늘
                 </h2>
                 <p className="text-sm text-muted-foreground">{summary}</p>
               </div>

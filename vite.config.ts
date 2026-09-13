@@ -56,6 +56,7 @@ function localApiPlugin(): Plugin {
             const result = await searchRecentListings(
               url.searchParams.get('q') ?? '',
               controller.signal,
+              url.searchParams.get('since'),
             )
             sendJson(res, 200, result)
           } catch (cause) {

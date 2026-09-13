@@ -1,7 +1,7 @@
 import { parse } from 'node-html-parser'
+import { resolveSince, sinceCutoffUnix } from './since.ts'
 
 export const SUKEBEI_ORIGIN = 'https://sukebei.nyaa.si'
-export const WINDOW_DAYS = 30
 const PAGE_SIZE = 75
 const MAX_PAGES = 16
 const PAGE_DELAY_MS = 250
@@ -25,7 +25,7 @@ export type Listing = {
 
 export type SearchResponse = {
   query: string
-  windowDays: number
+  since: string
   pagesFetched: number
   itemCount: number
   items: Listing[]
@@ -185,6 +185,7 @@ async function fetchSearchPage(
 export async function searchRecentListings(
   rawQuery: string,
   signal?: AbortSignal,
+  sinceRaw?: string | null,
 ): Promise<SearchResponse> {
   const query = rawQuery.trim()
   if (!query) {
@@ -194,7 +195,8 @@ export async function searchRecentListings(
     throw new SearchError('검색어가 너무 길어요. 200자 이하로 줄여 주세요.', 400)
   }
 
-  const cutoff = Math.floor(Date.now() / 1000) - WINDOW_DAYS * 24 * 60 * 60
+  const since = resolveSince(sinceRaw)
+  const cutoff = sinceCutoffUnix(since)
   const items: Listing[] = []
   let pagesFetched = 0
   let stoppedReason: SearchResponse['stoppedReason'] = 'no-more'
@@ -240,7 +242,7 @@ export async function searchRecentListings(
 
   return {
     query,
-    windowDays: WINDOW_DAYS,
+    since,
     pagesFetched,
     itemCount: items.length,
     items,
