@@ -50,7 +50,7 @@ function localApiPlugin(): Plugin {
           }
 
           const controller = new AbortController()
-          req.on('close', () => controller.abort())
+          req.on('aborted', () => controller.abort())
 
           try {
             const result = await searchRecentListings(
@@ -83,7 +83,7 @@ function localApiPlugin(): Plugin {
           }
 
           const controller = new AbortController()
-          req.on('close', () => controller.abort())
+          req.on('aborted', () => controller.abort())
 
           try {
             const parsed: unknown = JSON.parse((await readBody(req)) || '{}')
