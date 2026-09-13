@@ -16,10 +16,27 @@ import { translateTexts } from '@/lib/translate'
 import { cn } from '@/lib/utils'
 
 const TRANSLATE_CHUNK = 20
+const DEFAULT_MIN_SEEDERS = 3
 
 function readQueryParam() {
   const q = new URLSearchParams(window.location.search).get('q')
   return q?.trim() ?? ''
+}
+
+function parseMinSeeders(raw: string) {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return DEFAULT_MIN_SEEDERS
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_MIN_SEEDERS
+  }
+  return parsed
+}
+
+function normalizeSeedDraft(raw: string) {
+  return String(parseMinSeeders(raw))
 }
 
 function formatDate(iso: string) {
@@ -53,16 +70,27 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [translated, setTranslated] = useState<Record<string, string>>({})
   const [translating, setTranslating] = useState(false)
+  const [seedDraft, setSeedDraft] = useState(String(DEFAULT_MIN_SEEDERS))
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
+  const minSeeders = parseMinSeeders(seedDraft)
 
-  const hasItems = (result?.items.length ?? 0) > 0
+  const fetchedItems = result?.items ?? []
+  const visibleItems = useMemo(
+    () => fetchedItems.filter((item) => item.seeders >= minSeeders),
+    [fetchedItems, minSeeders],
+  )
+  const hasFetchedItems = fetchedItems.length > 0
+  const hasVisibleItems = visibleItems.length > 0
   const summary = useMemo(() => {
     if (!result) {
       return null
     }
-    return `${result.windowDays}일 · ${result.itemCount}건 · ${result.pagesFetched}페이지`
-  }, [result])
+    if (visibleItems.length === result.itemCount) {
+      return `${result.windowDays}일 · ${visibleItems.length}건 · ${result.pagesFetched}페이지 · 시드 ${minSeeders}↑`
+    }
+    return `${result.windowDays}일 · ${visibleItems.length}건 표시 · 전체 ${result.itemCount}건 · 시드 ${minSeeders}↑`
+  }, [minSeeders, result, visibleItems.length])
 
   async function runSearch(raw: string) {
     const query = raw.trim()
@@ -190,7 +218,7 @@ export default function App() {
           </div>
 
           <form
-            className="flex flex-col gap-2 sm:flex-row"
+            className="flex flex-col gap-2 sm:flex-row sm:items-stretch"
             onSubmit={(event) => {
               event.preventDefault()
               void runSearch(draft)
@@ -204,11 +232,32 @@ export default function App() {
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="sukebei.nyaa.si와 같은 검색어"
-              className="h-12 text-base"
+              className="h-12 min-w-0 flex-1 text-base"
               autoComplete="off"
               autoFocus
               disabled={status === 'loading'}
             />
+            <div className="flex h-12 shrink-0 items-center gap-2 rounded-lg border border-input px-3 sm:w-32">
+              <label
+                htmlFor="min-seeders"
+                className="shrink-0 text-sm font-medium text-muted-foreground"
+              >
+                시드
+              </label>
+              <Input
+                id="min-seeders"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                value={seedDraft}
+                onChange={(event) => setSeedDraft(event.target.value)}
+                onBlur={() => setSeedDraft(normalizeSeedDraft(seedDraft))}
+                aria-label="최소 시드 수"
+                className="h-11 border-0 bg-transparent px-0 text-base shadow-none focus-visible:ring-0 md:text-base"
+                disabled={status === 'loading'}
+              />
+            </div>
             <Button
               type="submit"
               size="lg"
@@ -256,7 +305,7 @@ export default function App() {
           </div>
         ) : null}
 
-        {status !== 'loading' && result && !hasItems ? (
+        {status !== 'loading' && result && !hasFetchedItems ? (
           <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
             <p className="font-medium">최근 30일 안에 맞는 결과가 없어요</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
@@ -266,7 +315,17 @@ export default function App() {
           </div>
         ) : null}
 
-        {status !== 'loading' && result && hasItems ? (
+        {status !== 'loading' && result && hasFetchedItems && !hasVisibleItems ? (
+          <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
+            <p className="font-medium">시드 {minSeeders}개 이상인 항목이 없어요</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              최근 30일 결과 {result.itemCount}건 가운데 시드가 {minSeeders} 이상인 글이
+              없습니다. 시드 숫자를 낮춰 보세요.
+            </p>
+          </div>
+        ) : null}
+
+        {status !== 'loading' && result && hasVisibleItems ? (
           <section className="space-y-3">
             <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
               <div>
@@ -283,7 +342,7 @@ export default function App() {
             </div>
 
             <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-              {result.items.map((item) => {
+              {visibleItems.map((item) => {
                 const titleKo = translated[item.title] ?? item.title
                 const showOriginal = titleKo !== item.title
                 const categoryKo =
