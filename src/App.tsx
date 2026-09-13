@@ -12,6 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { categoryLabel } from '@/lib/categories'
 import { searchListings, type SearchResponse } from '@/lib/search'
+import { translateTexts } from '@/lib/translate'
+
+const TRANSLATE_CHUNK = 20
 
 function readQueryParam() {
   const q = new URLSearchParams(window.location.search).get('q')
@@ -47,7 +50,10 @@ export default function App() {
   const [result, setResult] = useState<SearchResponse | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [translated, setTranslated] = useState<Record<string, string>>({})
+  const [translating, setTranslating] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const translateAbortRef = useRef<AbortController | null>(null)
 
   const hasItems = (result?.items.length ?? 0) > 0
   const summary = useMemo(() => {
@@ -63,10 +69,12 @@ export default function App() {
       setError('검색어를 입력하세요.')
       setStatus('error')
       setResult(null)
+      setTranslated({})
       return
     }
 
     abortRef.current?.abort()
+    translateAbortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -76,6 +84,8 @@ export default function App() {
 
     setStatus('loading')
     setError(null)
+    setTranslated({})
+    setTranslating(false)
 
     try {
       const payload = await searchListings(query, controller.signal)
@@ -102,8 +112,66 @@ export default function App() {
     }
     return () => {
       abortRef.current?.abort()
+      translateAbortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (!result?.items.length) {
+      setTranslating(false)
+      return
+    }
+
+    const unique = [...new Set(result.items.map((item) => item.title))]
+    const categories = [
+      ...new Set(
+        result.items
+          .map((item) => item.category)
+          .filter((category) => categoryLabel(category) === category),
+      ),
+    ]
+    const pending = [...unique, ...categories]
+    if (pending.length === 0) {
+      return
+    }
+
+    const controller = new AbortController()
+    translateAbortRef.current?.abort()
+    translateAbortRef.current = controller
+    setTranslating(true)
+
+    void (async () => {
+      try {
+        for (let offset = 0; offset < pending.length; offset += TRANSLATE_CHUNK) {
+          if (controller.signal.aborted) {
+            return
+          }
+          const slice = pending.slice(offset, offset + TRANSLATE_CHUNK)
+          const next = await translateTexts(slice, controller.signal)
+          setTranslated((current) => {
+            const merged = { ...current }
+            slice.forEach((original, index) => {
+              merged[original] = next[index] ?? original
+            })
+            return merged
+          })
+        }
+      } catch (cause) {
+        if (controller.signal.aborted) {
+          return
+        }
+        console.warn('translation fallback to original', cause)
+      } finally {
+        if (!controller.signal.aborted) {
+          setTranslating(false)
+        }
+      }
+    })()
+
+    return () => {
+      controller.abort()
+    }
+  }, [result])
 
   return (
     <div className="min-h-svh bg-muted/40">
@@ -116,7 +184,7 @@ export default function App() {
             </h1>
             <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
               사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 공개 검색으로 최근 약
-              30일 결과를 모읍니다.
+              30일 결과를 모으고, 제목은 한국어로 옮겨 보여 줍니다.
             </p>
           </div>
 
@@ -207,56 +275,75 @@ export default function App() {
                 <p className="text-sm text-muted-foreground">{summary}</p>
               </div>
               <p className="text-xs text-muted-foreground md:max-w-sm md:text-right">
-                {stoppedCopy(result)}
+                {translating
+                  ? '제목을 한국어로 옮기는 중… 실패하면 원문을 그대로 둡니다.'
+                  : stoppedCopy(result)}
               </p>
             </div>
 
             <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-              {result.items.map((item) => (
-                <li key={item.id} className="flex flex-col gap-3 p-4 md:flex-row md:items-start">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <a
-                      href={item.viewUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium leading-snug hover:underline"
-                    >
-                      {item.title}
-                    </a>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                      <Badge variant="secondary">{categoryLabel(item.category)}</Badge>
-                      <span>{formatDate(item.date)}</span>
-                      <span>{item.size || '용량 없음'}</span>
-                      <span className="inline-flex items-center gap-1">
-                        <ArrowUp className="size-3.5" />
-                        시드 {item.seeders}
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <ArrowDown className="size-3.5" />
-                        리치 {item.leechers}
-                      </span>
+              {result.items.map((item) => {
+                const titleKo = translated[item.title] ?? item.title
+                const showOriginal = titleKo !== item.title
+                const categoryKo =
+                  translated[item.category] ?? categoryLabel(item.category)
+                return (
+                  <li
+                    key={item.id}
+                    className="flex flex-col gap-3 p-4 md:flex-row md:items-start"
+                  >
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <a
+                        href={item.viewUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={item.title}
+                        className="font-medium leading-snug hover:underline"
+                      >
+                        {titleKo}
+                      </a>
+                      {showOriginal ? (
+                        <p className="break-all text-xs text-muted-foreground" title="원문">
+                          {item.title}
+                        </p>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="secondary" title={item.category}>
+                          {categoryKo}
+                        </Badge>
+                        <span>{formatDate(item.date)}</span>
+                        <span>{item.size || '용량 없음'}</span>
+                        <span className="inline-flex items-center gap-1">
+                          <ArrowUp className="size-3.5" />
+                          시드 {item.seeders}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <ArrowDown className="size-3.5" />
+                          리치 {item.leechers}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    {item.magnet ? (
-                      <Button asChild variant="outline" size="sm">
-                        <a href={item.magnet}>
-                          <Magnet data-icon="inline-start" />
-                          마그넷
-                        </a>
-                      </Button>
-                    ) : null}
-                    {item.torrent ? (
-                      <Button asChild variant="outline" size="sm">
-                        <a href={item.torrent}>
-                          <Download data-icon="inline-start" />
-                          토렌트
-                        </a>
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
+                    <div className="flex shrink-0 gap-2">
+                      {item.magnet ? (
+                        <Button asChild variant="outline" size="sm">
+                          <a href={item.magnet} title={item.title}>
+                            <Magnet data-icon="inline-start" />
+                            마그넷
+                          </a>
+                        </Button>
+                      ) : null}
+                      {item.torrent ? (
+                        <Button asChild variant="outline" size="sm">
+                          <a href={item.torrent} title={item.title}>
+                            <Download data-icon="inline-start" />
+                            토렌트
+                          </a>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           </section>
         ) : null}
