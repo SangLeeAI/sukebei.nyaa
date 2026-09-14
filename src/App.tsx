@@ -130,6 +130,7 @@ export default function App() {
   const [qbitError, setQbitError] = useState<string | null>(null)
   const [savedOpen, setSavedOpen] = useState(false)
   const [savedQueries, setSavedQueries] = useState<LastDownloadRecord[]>([])
+  const [savedQueryCount, setSavedQueryCount] = useState(0)
   const [savedLoading, setSavedLoading] = useState(false)
   const [savedError, setSavedError] = useState<string | null>(null)
   const [deletingQuery, setDeletingQuery] = useState<string | null>(null)
@@ -260,6 +261,11 @@ export default function App() {
           })
           if (recorded) {
             setLastDownload(recorded)
+            try {
+              const rows = await fetchLastDownloads()
+              setSavedQueries(rows)
+              setSavedQueryCount(rows.length)
+            } catch {}
           }
         } catch (recordError) {
           console.warn('last download record failed', recordError)
@@ -370,9 +376,10 @@ export default function App() {
     setSavedLoading(true)
     setSavedError(null)
     try {
-      setSavedQueries(await fetchLastDownloads())
+      const rows = await fetchLastDownloads()
+      setSavedQueries(rows)
+      setSavedQueryCount(rows.length)
     } catch (cause) {
-      setSavedQueries([])
       setSavedError(
         cause instanceof Error
           ? cause.message
@@ -399,6 +406,7 @@ export default function App() {
       await deleteLastDownload(record.query)
       const rows = await fetchLastDownloads()
       setSavedQueries(rows)
+      setSavedQueryCount(rows.length)
       setLastDownload((prev) =>
         prev && queryKey(prev.query) === queryKey(record.query) ? null : prev,
       )
@@ -483,6 +491,24 @@ export default function App() {
       .catch(() => {
         setPendingItems([])
       })
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchLastDownloads(controller.signal)
+      .then((rows) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        setSavedQueries(rows)
+        setSavedQueryCount(rows.length)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) {
+          return
+        }
+      })
+    return () => controller.abort()
   }, [])
 
   useEffect(() => {
@@ -602,10 +628,11 @@ export default function App() {
                 type="button"
                 variant="outline"
                 data-testid="open-saved-queries"
+                data-saved-query-count={savedQueryCount}
                 onClick={() => void openSavedQueries()}
               >
                 <Bookmark data-icon="inline-start" />
-                저장된 검색어
+                저장된 검색어 ({savedQueryCount})
               </Button>
               <Button
                 type="button"
