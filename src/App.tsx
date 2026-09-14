@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  Bookmark,
   CalendarPlus,
   Download,
   ListTodo,
@@ -14,9 +15,11 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { PendingQbitDialog, QbitPromptDialog } from '@/components/qbit-dialogs'
+import { SavedQueriesDialog } from '@/components/saved-queries-dialog'
 import { categoryLabel } from '@/lib/categories'
 import {
   fetchLastDownload,
+  fetchLastDownloads,
   queryKey,
   saveLastDownload,
   type LastDownloadRecord,
@@ -124,6 +127,10 @@ export default function App() {
   const [promptIds, setPromptIds] = useState<number[]>([])
   const [qbitBusy, setQbitBusy] = useState(false)
   const [qbitError, setQbitError] = useState<string | null>(null)
+  const [savedOpen, setSavedOpen] = useState(false)
+  const [savedQueries, setSavedQueries] = useState<LastDownloadRecord[]>([])
+  const [savedLoading, setSavedLoading] = useState(false)
+  const [savedError, setSavedError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
@@ -356,6 +363,33 @@ export default function App() {
     }
   }
 
+  async function openSavedQueries() {
+    setSavedOpen(true)
+    setSavedLoading(true)
+    setSavedError(null)
+    try {
+      setSavedQueries(await fetchLastDownloads())
+    } catch (cause) {
+      setSavedQueries([])
+      setSavedError(
+        cause instanceof Error
+          ? cause.message
+          : '저장된 검색어를 읽지 못했어요.',
+      )
+    } finally {
+      setSavedLoading(false)
+    }
+  }
+
+  function applySavedQuery(record: LastDownloadRecord) {
+    const date = resolveSince(record.date)
+    setDraft(record.query)
+    setSinceDraft(date)
+    setLastDownload(record)
+    setSavedOpen(false)
+    void runSearch(record.query, date)
+  }
+
   async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
     const query = raw.trim()
     if (!query) {
@@ -540,20 +574,30 @@ export default function App() {
                 공개 검색으로 모으고, 제목은 한국어로 옮겨 보여 줍니다.
               </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              data-testid="open-pending"
-              className="shrink-0"
-              onClick={() => {
-                setQbitError(null)
-                setPendingOpen(true)
-              }}
-            >
-              <ListTodo data-icon="inline-start" />
-              미추가 파일 다운로드
-              {pendingItems.length > 0 ? ` (${pendingItems.length})` : ''}
-            </Button>
+            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="open-saved-queries"
+                onClick={() => void openSavedQueries()}
+              >
+                <Bookmark data-icon="inline-start" />
+                저장된 검색어
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="open-pending"
+                onClick={() => {
+                  setQbitError(null)
+                  setPendingOpen(true)
+                }}
+              >
+                <ListTodo data-icon="inline-start" />
+                미추가 파일 다운로드
+                {pendingItems.length > 0 ? ` (${pendingItems.length})` : ''}
+              </Button>
+            </div>
           </div>
 
           <form
@@ -859,6 +903,14 @@ export default function App() {
             }
           })
         }}
+      />
+      <SavedQueriesDialog
+        open={savedOpen}
+        items={savedQueries}
+        loading={savedLoading}
+        error={savedError}
+        onClose={() => setSavedOpen(false)}
+        onPick={applySavedQuery}
       />
     </div>
   )

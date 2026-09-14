@@ -13,6 +13,7 @@ import {
 import { parseSaveItems, saveTorrentsToDownloads } from './server/save-torrents.ts'
 import {
   getLastDownload,
+  listLastDownloads,
   parseLastDownloadInput,
   upsertLastDownload,
 } from './server/last-download-db.ts'
@@ -182,6 +183,25 @@ function localApiPlugin(): Plugin {
                 ? cause.message
                 : '토렌트 파일을 저장하지 못했어요.'
             sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/last-downloads') {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'GET')
+            res.end()
+            return
+          }
+          try {
+            sendJson(res, 200, { records: listLastDownloads() })
+          } catch (cause) {
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '저장된 검색어를 읽지 못했어요.'
+            sendJson(res, 500, { error: message })
           }
           return
         }

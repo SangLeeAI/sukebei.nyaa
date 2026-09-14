@@ -105,6 +105,26 @@ export function getLastDownload(rawQuery: string) {
   return row ? rowToRecord(row) : null
 }
 
+export function listLastDownloads() {
+  const rows = openLastDownloadDb()
+    .prepare(
+      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at
+       FROM last_download
+       ORDER BY timestamp DESC, saved_at DESC`,
+    )
+    .all() as {
+    query: string
+    title: string
+    title_ko: string
+    item_date: string
+    item_iso: string
+    item_id: string
+    timestamp: number
+    saved_at: string
+  }[]
+  return rows.map(rowToRecord)
+}
+
 export function parseLastDownloadInput(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw new SearchError('저장할 내용이 없어요.', 400)
