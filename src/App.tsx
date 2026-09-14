@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  CalendarPlus,
   Download,
   LoaderCircle,
   Magnet,
@@ -12,8 +13,15 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { categoryLabel } from '@/lib/categories'
+import {
+  fetchLastDownload,
+  queryKey,
+  saveLastDownload,
+  type LastDownloadRecord,
+} from '@/lib/last-download'
 import { searchListings, type Listing, type SearchResponse } from '@/lib/search'
 import {
+  formatYmd,
   resolveSince,
   todayYmd,
 } from '@/lib/since'
@@ -63,6 +71,16 @@ function formatDate(iso: string) {
   })
 }
 
+function newestListing(items: Listing[]) {
+  return items.reduce((best, item) =>
+    item.timestamp > best.timestamp ? item : best,
+  )
+}
+
+function listingDateYmd(item: Listing) {
+  return formatYmd(new Date(item.timestamp * 1000))
+}
+
 function stoppedCopy(result: SearchResponse) {
   if (result.stoppedReason === 'page-limit') {
     return '공개 검색 페이지 한도에 닿아 여기서 멈췄어요. 검색어를 더 구체적으로 줄이면 빠짐없이 보기 쉬워요.'
@@ -85,6 +103,9 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [downloading, setDownloading] = useState(false)
   const [downloadNote, setDownloadNote] = useState<string | null>(null)
+  const [lastDownload, setLastDownload] = useState<LastDownloadRecord | null>(
+    null,
+  )
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
@@ -113,6 +134,10 @@ export default function App() {
     }
     return `${result.since}–오늘 · ${visibleItems.length}건 표시 · 전체 ${result.itemCount}건 · 시드 ${minSeeders}↑`
   }, [minSeeders, result, visibleItems.length])
+  const matchingLastDownload =
+    lastDownload && queryKey(lastDownload.query) === queryKey(draft)
+      ? lastDownload
+      : null
 
   function clearSelection() {
     setSelected(new Set())
@@ -191,6 +216,28 @@ export default function App() {
             : `토렌트 파일 ${outcome.saved}개를 저장했어요.`,
         )
       }
+
+      const savedItems = outcome.savedItems ?? []
+      const query = result?.query ?? draft.trim()
+      if (savedItems.length > 0 && query) {
+        const newest = newestListing(savedItems)
+        try {
+          const recorded = await saveLastDownload({
+            query,
+            title: newest.title,
+            titleKo: translated[newest.title] ?? newest.title,
+            date: listingDateYmd(newest),
+            iso: newest.date,
+            id: newest.id,
+            timestamp: newest.timestamp,
+          })
+          if (recorded) {
+            setLastDownload(recorded)
+          }
+        } catch (recordError) {
+          console.warn('last download record failed', recordError)
+        }
+      }
     } catch (cause) {
       if (controller.signal.aborted) {
         return
@@ -204,6 +251,17 @@ export default function App() {
       if (!controller.signal.aborted) {
         setDownloading(false)
       }
+    }
+  }
+
+  function applyLastDownloadSince() {
+    if (!lastDownload) {
+      return
+    }
+    const date = resolveSince(lastDownload.date)
+    setSinceDraft(date)
+    if (draft.trim()) {
+      void runSearch(draft, date)
     }
   }
 
@@ -270,6 +328,46 @@ export default function App() {
       downloadAbortRef.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    const q = queryKey(draft)
+    if (!q) {
+      setLastDownload(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void fetchLastDownload(q, controller.signal)
+        .then((record) => {
+          if (controller.signal.aborted) {
+            return
+          }
+          setLastDownload((current) => {
+            if (record) {
+              return record
+            }
+            if (current && queryKey(current.query) === q) {
+              return current
+            }
+            return null
+          })
+        })
+        .catch(() => {
+          if (controller.signal.aborted) {
+            return
+          }
+          setLastDownload((current) =>
+            current && queryKey(current.query) === q ? current : null,
+          )
+        })
+    }, 200)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [draft])
 
   useEffect(() => {
     if (!result?.items.length) {
@@ -422,6 +520,47 @@ export default function App() {
               검색
             </Button>
           </form>
+
+          {matchingLastDownload ? (
+            <div
+              data-testid="last-download-card"
+              className="flex flex-col gap-3 rounded-xl border bg-card p-3 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">
+                  이 검색에서 마지막으로 받은 글 · {matchingLastDownload.date}
+                </p>
+                <p
+                  className="font-medium leading-snug"
+                  title={matchingLastDownload.title}
+                  data-testid="last-download-title"
+                >
+                  {matchingLastDownload.titleKo}
+                </p>
+                {matchingLastDownload.titleKo !== matchingLastDownload.title ? (
+                  <p className="break-all text-xs text-muted-foreground">
+                    {matchingLastDownload.title}
+                  </p>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  {formatDate(matchingLastDownload.iso)} · 시작일로 넣으면 이 날짜부터
+                  다시 찾습니다.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="apply-since"
+                className="shrink-0"
+                onClick={applyLastDownloadSince}
+                disabled={status === 'loading'}
+              >
+                <CalendarPlus data-icon="inline-start" />
+                이 날짜를 시작일로
+              </Button>
+            </div>
+          ) : null}
         </header>
 
         {status === 'error' && error ? (

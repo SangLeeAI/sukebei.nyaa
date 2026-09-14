@@ -6,6 +6,7 @@ export type DownloadOutcome = {
   cancelled?: boolean
   directory?: string
   method?: 'blob' | 'folder' | 'downloads'
+  savedItems: Listing[]
 }
 
 function sanitizeFilenamePart(title: string) {
@@ -145,7 +146,7 @@ async function saveWithFolderPicker(
   },
 ) {
   const used = new Set<string>()
-  let saved = 0
+  const savedItems: Listing[] = []
   let skipped = 0
 
   for (let index = 0; index < items.length; index += 1) {
@@ -159,7 +160,7 @@ async function saveWithFolderPicker(
         item.id,
       )
       await writeBlobToDirectory(directory, name, blob)
-      saved += 1
+      savedItems.push(item)
     } catch (cause) {
       if (isAbortError(cause)) {
         throw cause
@@ -169,13 +170,18 @@ async function saveWithFolderPicker(
     options?.onProgress?.(index + 1, items.length)
   }
 
-  if (saved === 0) {
+  if (savedItems.length === 0) {
     throw new Error(
       '선택한 항목에서 토렌트 파일을 받지 못했어요. 마그넷만 있는 글일 수 있어요.',
     )
   }
 
-  return { saved, skipped, method: 'folder' as const }
+  return {
+    saved: savedItems.length,
+    skipped,
+    method: 'folder' as const,
+    savedItems,
+  }
 }
 
 async function saveWithLocalDownloads(
@@ -208,6 +214,14 @@ async function saveWithLocalDownloads(
     typeof payload.skipped === 'number'
       ? payload.skipped
       : 0
+  const savedIds =
+    payload &&
+    typeof payload === 'object' &&
+    'savedIds' in payload &&
+    Array.isArray(payload.savedIds)
+      ? payload.savedIds.filter((id): id is string => typeof id === 'string')
+      : items.map((item) => item.id)
+  const savedItems = items.filter((item) => savedIds.includes(item.id))
   const directory =
     payload &&
     typeof payload === 'object' &&
@@ -215,7 +229,13 @@ async function saveWithLocalDownloads(
     typeof payload.directory === 'string'
       ? payload.directory
       : undefined
-  return { saved, skipped, directory, method: 'downloads' as const }
+  return {
+    saved,
+    skipped,
+    directory,
+    method: 'downloads' as const,
+    savedItems,
+  }
 }
 
 export async function downloadSelectedTorrents(
@@ -227,7 +247,7 @@ export async function downloadSelectedTorrents(
 ): Promise<DownloadOutcome> {
   const signal = options?.signal
   if (items.length === 0) {
-    return { saved: 0, skipped: 0 }
+    return { saved: 0, skipped: 0, savedItems: [] }
   }
 
   if (items.length === 1) {
@@ -235,7 +255,7 @@ export async function downloadSelectedTorrents(
     const blob = await fetchTorrentBlob(item.id, signal)
     saveBlob(blob, torrentFilename(item.title, item.id))
     options?.onProgress?.(1, 1)
-    return { saved: 1, skipped: 0, method: 'blob' }
+    return { saved: 1, skipped: 0, method: 'blob', savedItems: [item] }
   }
 
   let directory: FileSystemDirectoryHandle | null = null
@@ -246,7 +266,7 @@ export async function downloadSelectedTorrents(
       if (signal?.aborted) {
         throw cause
       }
-      return { saved: 0, skipped: 0, cancelled: true }
+      return { saved: 0, skipped: 0, cancelled: true, savedItems: [] }
     }
     throw cause
   }
@@ -259,7 +279,7 @@ export async function downloadSelectedTorrents(
     `선택한 ${items.length}개 토렌트를 다운로드 폴더에 각각 저장할까요?`,
   )
   if (!confirmed) {
-    return { saved: 0, skipped: 0, cancelled: true }
+    return { saved: 0, skipped: 0, cancelled: true, savedItems: [] }
   }
 
   options?.onProgress?.(0, items.length)

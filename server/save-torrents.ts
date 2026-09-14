@@ -132,6 +132,7 @@ export async function saveTorrentsToDownloads(
   await fs.mkdir(directory, { recursive: true })
   const used = new Set<string>()
   const files: string[] = []
+  const savedIds: string[] = []
   let skipped = 0
 
   for (let index = 0; index < items.length; index += 1) {
@@ -148,6 +149,7 @@ export async function saveTorrentsToDownloads(
       )
       await fs.writeFile(path.join(directory, name), data)
       files.push(name)
+      savedIds.push(item.id)
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') {
         throw cause
@@ -166,6 +168,7 @@ export async function saveTorrentsToDownloads(
   return {
     directory,
     files,
+    savedIds,
     saved: files.length,
     skipped,
   }

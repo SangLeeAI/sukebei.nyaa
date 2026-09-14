@@ -11,6 +11,11 @@ import {
   parseTorrentId,
 } from './server/sukebei-torrent.ts'
 import { parseSaveItems, saveTorrentsToDownloads } from './server/save-torrents.ts'
+import {
+  getLastDownload,
+  parseLastDownloadInput,
+  upsertLastDownload,
+} from './server/last-download-db.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -165,6 +170,45 @@ function localApiPlugin(): Plugin {
               cause instanceof Error
                 ? cause.message
                 : '토렌트 파일을 저장하지 못했어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/last-download') {
+          if (req.method === 'GET') {
+            try {
+              const record = getLastDownload(url.searchParams.get('q') ?? '')
+              sendJson(res, 200, { record })
+            } catch (cause) {
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '마지막 받은 글을 읽지 못했어요.'
+              sendJson(res, 500, { error: message })
+            }
+            return
+          }
+
+          if (req.method !== 'PUT' && req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'GET, PUT, POST')
+            res.end()
+            return
+          }
+
+          try {
+            const input = parseLastDownloadInput(
+              JSON.parse((await readBody(req)) || '{}'),
+            )
+            const record = upsertLastDownload(input)
+            sendJson(res, 200, { record })
+          } catch (cause) {
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '마지막 받은 글을 저장하지 못했어요.'
             sendJson(res, status, { error: message })
           }
           return

@@ -11,7 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
-.translate-cache.json
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Editor directories and files
 .vscode/*
