@@ -18,6 +18,7 @@ import { PendingQbitDialog, QbitPromptDialog } from '@/components/qbit-dialogs'
 import { SavedQueriesDialog } from '@/components/saved-queries-dialog'
 import { categoryLabel } from '@/lib/categories'
 import {
+  deleteLastDownload,
   fetchLastDownload,
   fetchLastDownloads,
   queryKey,
@@ -131,6 +132,7 @@ export default function App() {
   const [savedQueries, setSavedQueries] = useState<LastDownloadRecord[]>([])
   const [savedLoading, setSavedLoading] = useState(false)
   const [savedError, setSavedError] = useState<string | null>(null)
+  const [deletingQuery, setDeletingQuery] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
@@ -388,6 +390,27 @@ export default function App() {
     setLastDownload(record)
     setSavedOpen(false)
     void runSearch(record.query, date)
+  }
+
+  async function handleDeleteSavedQuery(record: LastDownloadRecord) {
+    setDeletingQuery(record.query)
+    setSavedError(null)
+    try {
+      await deleteLastDownload(record.query)
+      const rows = await fetchLastDownloads()
+      setSavedQueries(rows)
+      setLastDownload((prev) =>
+        prev && queryKey(prev.query) === queryKey(record.query) ? null : prev,
+      )
+    } catch (cause) {
+      setSavedError(
+        cause instanceof Error
+          ? cause.message
+          : '저장된 검색어를 지우지 못했어요.',
+      )
+    } finally {
+      setDeletingQuery(null)
+    }
   }
 
   async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
@@ -909,8 +932,10 @@ export default function App() {
         items={savedQueries}
         loading={savedLoading}
         error={savedError}
+        deletingQuery={deletingQuery}
         onClose={() => setSavedOpen(false)}
         onPick={applySavedQuery}
+        onDelete={(record) => void handleDeleteSavedQuery(record)}
       />
     </div>
   )

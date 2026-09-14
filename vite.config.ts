@@ -12,6 +12,7 @@ import {
 } from './server/sukebei-torrent.ts'
 import { parseSaveItems, saveTorrentsToDownloads } from './server/save-torrents.ts'
 import {
+  deleteLastDownload,
   getLastDownload,
   listLastDownloads,
   parseLastDownloadInput,
@@ -221,9 +222,24 @@ function localApiPlugin(): Plugin {
             return
           }
 
+          if (req.method === 'DELETE') {
+            try {
+              const result = deleteLastDownload(url.searchParams.get('q') ?? '')
+              sendJson(res, 200, result)
+            } catch (cause) {
+              const status = cause instanceof SearchError ? cause.status : 500
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '저장된 검색어를 지우지 못했어요.'
+              sendJson(res, status, { error: message })
+            }
+            return
+          }
+
           if (req.method !== 'PUT' && req.method !== 'POST') {
             res.statusCode = 405
-            res.setHeader('Allow', 'GET, PUT, POST')
+            res.setHeader('Allow', 'GET, PUT, POST, DELETE')
             res.end()
             return
           }

@@ -99,6 +99,20 @@ export async function fetchLastDownloads(signal?: AbortSignal) {
     .filter((row): row is LastDownloadRecord => Boolean(row))
 }
 
+export async function deleteLastDownload(query: string, signal?: AbortSignal) {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    throw new Error('검색어가 없어요.')
+  }
+  const response = await fetch(
+    `/api/last-download?q=${encodeURIComponent(trimmed)}`,
+    { method: 'DELETE', signal },
+  )
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+}
+
 export async function saveLastDownload(
   record: {
     query: string

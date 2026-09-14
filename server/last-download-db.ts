@@ -168,6 +168,17 @@ export function parseLastDownloadInput(payload: unknown) {
   }
 }
 
+export function deleteLastDownload(rawQuery: string) {
+  const query = queryKey(rawQuery)
+  if (!query) {
+    throw new SearchError('검색어가 없어요.', 400)
+  }
+  const info = openLastDownloadDb()
+    .prepare(`DELETE FROM last_download WHERE query = ?`)
+    .run(query)
+  return { query, deleted: Number(info.changes) > 0 }
+}
+
 export function upsertLastDownload(input: ReturnType<typeof parseLastDownloadInput>) {
   const savedAt = new Date().toISOString()
   openLastDownloadDb()

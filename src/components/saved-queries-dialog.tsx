@@ -7,15 +7,19 @@ export function SavedQueriesDialog({
   items,
   loading,
   error,
+  deletingQuery,
   onClose,
   onPick,
+  onDelete,
 }: {
   open: boolean
   items: LastDownloadRecord[]
   loading: boolean
   error: string | null
+  deletingQuery: string | null
   onClose: () => void
   onPick: (record: LastDownloadRecord) => void
+  onDelete: (record: LastDownloadRecord) => void
 }) {
   useEffect(() => {
     if (!open) {
@@ -54,17 +58,21 @@ export function SavedQueriesDialog({
             저장된 검색어
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            토렌트를 받았던 검색어와 마지막 글입니다. 고르면 검색창과 시작일에
-            넣습니다.
+            토렌트를 받았던 검색어와 마지막 글입니다. 제목을 고르면 검색창과
+            시작일에 넣습니다. 삭제는 오른쪽 버튼으로만 합니다.
           </p>
         </div>
+        {error ? (
+          <p
+            role="alert"
+            className="border-b px-4 py-3 text-sm text-destructive"
+          >
+            {error}
+          </p>
+        ) : null}
         <ul className="min-h-0 flex-1 overflow-y-auto divide-y">
           {loading ? (
             <li className="p-4 text-sm text-muted-foreground">불러오는 중…</li>
-          ) : error ? (
-            <li role="alert" className="p-4 text-sm text-destructive">
-              {error}
-            </li>
           ) : items.length === 0 ? (
             <li
               data-testid="saved-queries-empty"
@@ -74,11 +82,11 @@ export function SavedQueriesDialog({
             </li>
           ) : (
             items.map((item) => (
-              <li key={item.query}>
+              <li key={item.query} className="flex items-stretch">
                 <button
                   type="button"
                   data-testid={`saved-query-${item.query}`}
-                  className="flex w-full flex-col items-start gap-1 p-4 text-left hover:bg-muted/60"
+                  className="flex min-w-0 flex-1 flex-col items-start gap-1 p-4 text-left hover:bg-muted/60"
                   onClick={() => onPick(item)}
                 >
                   <p className="font-medium">{item.query}</p>
@@ -92,6 +100,29 @@ export function SavedQueriesDialog({
                     </p>
                   ) : null}
                 </button>
+                <div className="flex shrink-0 items-center border-l px-3">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    data-testid={`saved-query-delete-${item.query}`}
+                    disabled={deletingQuery === item.query}
+                    aria-label={`${item.query} 검색어 삭제`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const ok = window.confirm(
+                        `“${item.query}” 검색어를 삭제할까요?\n마지막 받은 글 기록도 함께 지워집니다.`,
+                      )
+                      if (!ok) {
+                        return
+                      }
+                      onDelete(item)
+                    }}
+                  >
+                    {deletingQuery === item.query ? '지우는 중…' : '삭제'}
+                  </Button>
+                </div>
               </li>
             ))
           )}
