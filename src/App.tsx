@@ -4,6 +4,7 @@ import {
   ArrowUp,
   CalendarPlus,
   Download,
+  ListTodo,
   LoaderCircle,
   Magnet,
   Search,
@@ -12,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { PendingQbitDialog, QbitPromptDialog } from '@/components/qbit-dialogs'
 import { categoryLabel } from '@/lib/categories'
 import {
   fetchLastDownload,
@@ -19,6 +21,13 @@ import {
   saveLastDownload,
   type LastDownloadRecord,
 } from '@/lib/last-download'
+import {
+  addPendingToQbittorrent,
+  fetchPendingTorrents,
+  savePendingTorrents,
+  stashDownloadedTorrents,
+  type PendingTorrent,
+} from '@/lib/pending'
 import { searchListings, type Listing, type SearchResponse } from '@/lib/search'
 import {
   formatYmd,
@@ -106,6 +115,15 @@ export default function App() {
   const [lastDownload, setLastDownload] = useState<LastDownloadRecord | null>(
     null,
   )
+  const [pendingItems, setPendingItems] = useState<PendingTorrent[]>([])
+  const [pendingOpen, setPendingOpen] = useState(false)
+  const [pendingSelected, setPendingSelected] = useState<Set<number>>(
+    () => new Set(),
+  )
+  const [qbitPromptOpen, setQbitPromptOpen] = useState(false)
+  const [promptIds, setPromptIds] = useState<number[]>([])
+  const [qbitBusy, setQbitBusy] = useState(false)
+  const [qbitError, setQbitError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
@@ -238,6 +256,52 @@ export default function App() {
           console.warn('last download record failed', recordError)
         }
       }
+
+      if (savedItems.length > 0 && query) {
+        try {
+          const stashed = await stashDownloadedTorrents(
+            query,
+            savedItems.map((item) => ({
+              itemId: item.id,
+              query,
+              title: item.title,
+              titleKo: translated[item.title] ?? item.title,
+              date: listingDateYmd(item),
+              iso: item.date,
+              timestamp: item.timestamp,
+              torrentBase64: outcome.torrentBase64ById?.[item.id],
+              filePath: '',
+            })),
+          )
+          const pendingRows = await savePendingTorrents(
+            stashed.map((item) => ({
+              itemId: item.itemId,
+              query: item.query,
+              title: item.title,
+              titleKo: item.titleKo,
+              date: item.date,
+              iso: item.iso,
+              timestamp: item.timestamp,
+              filePath: item.filePath,
+            })),
+          )
+          setPendingItems(pendingRows)
+          const justIds = pendingRows
+            .filter((row) =>
+              savedItems.some((item) => item.id === row.itemId),
+            )
+            .map((row) => row.id)
+          setPromptIds(justIds)
+          setQbitError(null)
+          setQbitPromptOpen(true)
+        } catch (stashError) {
+          setDownloadNote(
+            stashError instanceof Error
+              ? `${stashError.message} 파일은 저장됐지만 qBittorrent 목록에 넣지 못했어요.`
+              : '파일은 저장됐지만 qBittorrent 목록에 넣지 못했어요.',
+          )
+        }
+      }
     } catch (cause) {
       if (controller.signal.aborted) {
         return
@@ -251,6 +315,33 @@ export default function App() {
       if (!controller.signal.aborted) {
         setDownloading(false)
       }
+    }
+  }
+
+  async function addIdsToQbittorrent(ids: number[]) {
+    if (ids.length === 0 || qbitBusy) {
+      return false
+    }
+    setQbitBusy(true)
+    setQbitError(null)
+    try {
+      const result = await addPendingToQbittorrent(ids)
+      setPendingItems(result.items)
+      setPendingSelected((current) => {
+        const remaining = new Set(result.items.map((item) => item.id))
+        return new Set([...current].filter((id) => remaining.has(id)))
+      })
+      setDownloadNote(`qBittorrent에 토렌트 ${result.added}개를 추가했어요.`)
+      return true
+    } catch (cause) {
+      setQbitError(
+        cause instanceof Error
+          ? cause.message
+          : 'qBittorrent에 넣지 못했어요.',
+      )
+      return false
+    } finally {
+      setQbitBusy(false)
     }
   }
 
@@ -327,6 +418,14 @@ export default function App() {
       translateAbortRef.current?.abort()
       downloadAbortRef.current?.abort()
     }
+  }, [])
+
+  useEffect(() => {
+    void fetchPendingTorrents()
+      .then(({ items }) => setPendingItems(items))
+      .catch(() => {
+        setPendingItems([])
+      })
   }, [])
 
   useEffect(() => {
@@ -430,15 +529,31 @@ export default function App() {
     <div className="min-h-svh bg-muted/40">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:px-6 md:py-10">
         <header className="space-y-4">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-primary">Nyaa</p>
-            <h1 className="font-heading text-3xl tracking-tight md:text-4xl">
-              sukebei 검색
-            </h1>
-            <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-              사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 시작일부터 오늘까지
-              공개 검색으로 모으고, 제목은 한국어로 옮겨 보여 줍니다.
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-primary">Nyaa</p>
+              <h1 className="font-heading text-3xl tracking-tight md:text-4xl">
+                sukebei 검색
+              </h1>
+              <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
+                사이트 검색창에 넣는 것과 같은 검색어를 입력하세요. 시작일부터 오늘까지
+                공개 검색으로 모으고, 제목은 한국어로 옮겨 보여 줍니다.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="open-pending"
+              className="shrink-0"
+              onClick={() => {
+                setQbitError(null)
+                setPendingOpen(true)
+              }}
+            >
+              <ListTodo data-icon="inline-start" />
+              미추가 파일 다운로드
+              {pendingItems.length > 0 ? ` (${pendingItems.length})` : ''}
+            </Button>
           </div>
 
           <form
@@ -692,6 +807,59 @@ export default function App() {
           </section>
         ) : null}
       </div>
+      <QbitPromptDialog
+        open={qbitPromptOpen}
+        count={promptIds.length}
+        busy={qbitBusy}
+        error={qbitError}
+        onLater={() => {
+          setQbitPromptOpen(false)
+          setQbitError(null)
+          setDownloadNote(
+            `토렌트 ${promptIds.length}개를 미추가 목록에 남겨 두었어요.`,
+          )
+        }}
+        onAdd={() => {
+          void addIdsToQbittorrent(promptIds).then((ok) => {
+            if (ok) {
+              setQbitPromptOpen(false)
+            }
+          })
+        }}
+      />
+      <PendingQbitDialog
+        open={pendingOpen}
+        items={pendingItems}
+        selected={pendingSelected}
+        busy={qbitBusy}
+        error={qbitError}
+        onClose={() => {
+          setPendingOpen(false)
+          setQbitError(null)
+        }}
+        onToggle={(id, checked) => {
+          setPendingSelected((current) => {
+            const next = new Set(current)
+            if (checked) {
+              next.add(id)
+            } else {
+              next.delete(id)
+            }
+            return next
+          })
+        }}
+        onSelectAll={() =>
+          setPendingSelected(new Set(pendingItems.map((item) => item.id)))
+        }
+        onClear={() => setPendingSelected(new Set())}
+        onAdd={() => {
+          void addIdsToQbittorrent([...pendingSelected]).then((ok) => {
+            if (ok) {
+              setPendingSelected(new Set())
+            }
+          })
+        }}
+      />
     </div>
   )
 }

@@ -16,6 +16,17 @@ import {
   parseLastDownloadInput,
   upsertLastDownload,
 } from './server/last-download-db.ts'
+import {
+  countPendingTorrents,
+  deletePendingByIds,
+  getPendingByIds,
+  listPendingTorrents,
+  parsePendingIds,
+  parsePendingInputs,
+  upsertPendingTorrents,
+} from './server/pending-db.ts'
+import { addTorrentFilesToQbittorrent } from './server/qbittorrent.ts'
+import { parseStashItems, stashTorrentFiles } from './server/torrent-stash.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -46,7 +57,7 @@ function readBody(req: IncomingMessage) {
     req.on('data', (chunk) => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
       const size = chunks.reduce((sum, part) => sum + part.length, 0)
-      if (size > 1_000_000) {
+      if (size > 8_000_000) {
         reject(new Error('요청이 너무 커요.'))
         req.destroy()
       }
@@ -210,6 +221,116 @@ function localApiPlugin(): Plugin {
                 ? cause.message
                 : '마지막 받은 글을 저장하지 못했어요.'
             sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/torrents/stash') {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'POST')
+            res.end()
+            return
+          }
+          const controller = new AbortController()
+          req.on('aborted', () => controller.abort())
+          try {
+            const items = parseStashItems(JSON.parse((await readBody(req)) || '{}'))
+            const stashed = await stashTorrentFiles(items, controller.signal)
+            sendJson(res, 200, { items: stashed })
+          } catch (cause) {
+            if (controller.signal.aborted) {
+              res.statusCode = 499
+              res.end()
+              return
+            }
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '토렌트 파일을 보관하지 못했어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/pending') {
+          if (req.method === 'GET') {
+            try {
+              sendJson(res, 200, {
+                items: listPendingTorrents(),
+                count: countPendingTorrents(),
+              })
+            } catch (cause) {
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '미추가 목록을 읽지 못했어요.'
+              sendJson(res, 500, { error: message })
+            }
+            return
+          }
+
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'GET, POST')
+            res.end()
+            return
+          }
+
+          try {
+            const items = parsePendingInputs(JSON.parse((await readBody(req)) || '{}'))
+            sendJson(res, 200, {
+              items: upsertPendingTorrents(items),
+              count: countPendingTorrents(),
+            })
+          } catch (cause) {
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : '미추가 목록을 저장하지 못했어요.'
+            sendJson(res, status, { error: message })
+          }
+          return
+        }
+
+        if (url.pathname === '/api/qbittorrent/add') {
+          if (req.method !== 'POST') {
+            res.statusCode = 405
+            res.setHeader('Allow', 'POST')
+            res.end()
+            return
+          }
+
+          try {
+            const ids = parsePendingIds(JSON.parse((await readBody(req)) || '{}'))
+            const rows = getPendingByIds(ids)
+            if (rows.length === 0) {
+              sendJson(res, 400, { error: '고른 미추가 항목이 없어요.' })
+              return
+            }
+            const added = await addTorrentFilesToQbittorrent(
+              rows.map((row) => row.filePath),
+            )
+            deletePendingByIds(rows.map((row) => row.id))
+            sendJson(res, 200, {
+              added: added.added,
+              origin: added.origin,
+              items: listPendingTorrents(),
+              count: countPendingTorrents(),
+            })
+          } catch (cause) {
+            const status = cause instanceof SearchError ? cause.status : 500
+            const message =
+              cause instanceof Error
+                ? cause.message
+                : 'qBittorrent에 넣지 못했어요.'
+            sendJson(res, status, {
+              error: message,
+              items: listPendingTorrents(),
+              count: countPendingTorrents(),
+            })
           }
           return
         }

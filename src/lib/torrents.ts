@@ -7,6 +7,7 @@ export type DownloadOutcome = {
   directory?: string
   method?: 'blob' | 'folder' | 'downloads'
   savedItems: Listing[]
+  torrentBase64ById: Record<string, string>
 }
 
 function sanitizeFilenamePart(title: string) {
@@ -49,6 +50,16 @@ async function readError(response: Response) {
     return payload.error
   }
   return `토렌트 요청이 실패했어요. (${response.status})`
+}
+
+async function blobToBase64(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunk = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk))
+  }
+  return btoa(binary)
 }
 
 async function fetchTorrentBlob(id: string, signal?: AbortSignal) {
@@ -147,6 +158,7 @@ async function saveWithFolderPicker(
 ) {
   const used = new Set<string>()
   const savedItems: Listing[] = []
+  const torrentBase64ById: Record<string, string> = {}
   let skipped = 0
 
   for (let index = 0; index < items.length; index += 1) {
@@ -160,6 +172,7 @@ async function saveWithFolderPicker(
         item.id,
       )
       await writeBlobToDirectory(directory, name, blob)
+      torrentBase64ById[item.id] = await blobToBase64(blob)
       savedItems.push(item)
     } catch (cause) {
       if (isAbortError(cause)) {
@@ -181,6 +194,7 @@ async function saveWithFolderPicker(
     skipped,
     method: 'folder' as const,
     savedItems,
+    torrentBase64ById,
   }
 }
 
@@ -235,6 +249,7 @@ async function saveWithLocalDownloads(
     directory,
     method: 'downloads' as const,
     savedItems,
+    torrentBase64ById: {},
   }
 }
 
@@ -247,7 +262,7 @@ export async function downloadSelectedTorrents(
 ): Promise<DownloadOutcome> {
   const signal = options?.signal
   if (items.length === 0) {
-    return { saved: 0, skipped: 0, savedItems: [] }
+    return { saved: 0, skipped: 0, savedItems: [], torrentBase64ById: {} }
   }
 
   if (items.length === 1) {
@@ -255,7 +270,13 @@ export async function downloadSelectedTorrents(
     const blob = await fetchTorrentBlob(item.id, signal)
     saveBlob(blob, torrentFilename(item.title, item.id))
     options?.onProgress?.(1, 1)
-    return { saved: 1, skipped: 0, method: 'blob', savedItems: [item] }
+    return {
+      saved: 1,
+      skipped: 0,
+      method: 'blob',
+      savedItems: [item],
+      torrentBase64ById: { [item.id]: await blobToBase64(blob) },
+    }
   }
 
   let directory: FileSystemDirectoryHandle | null = null
@@ -266,7 +287,13 @@ export async function downloadSelectedTorrents(
       if (signal?.aborted) {
         throw cause
       }
-      return { saved: 0, skipped: 0, cancelled: true, savedItems: [] }
+      return {
+        saved: 0,
+        skipped: 0,
+        cancelled: true,
+        savedItems: [],
+        torrentBase64ById: {},
+      }
     }
     throw cause
   }
@@ -279,7 +306,13 @@ export async function downloadSelectedTorrents(
     `선택한 ${items.length}개 토렌트를 다운로드 폴더에 각각 저장할까요?`,
   )
   if (!confirmed) {
-    return { saved: 0, skipped: 0, cancelled: true, savedItems: [] }
+    return {
+      saved: 0,
+      skipped: 0,
+      cancelled: true,
+      savedItems: [],
+      torrentBase64ById: {},
+    }
   }
 
   options?.onProgress?.(0, items.length)
