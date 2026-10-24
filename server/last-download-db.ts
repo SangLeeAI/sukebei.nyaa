@@ -19,12 +19,25 @@ export type LastDownloadRecord = {
   id: string
   timestamp: number
   savedAt: string
+  sortOrder: number
 }
 
 let db: DatabaseSync | null = null
 
 export function queryKey(raw: string) {
   return raw.trim().normalize('NFC')
+}
+
+function ensureSortOrderColumn(db: DatabaseSync) {
+  const columns = db.prepare(`PRAGMA table_info(last_download)`).all() as {
+    name?: unknown
+  }[]
+  const names = columns.map((column) => String(column.name))
+  if (!names.includes('sort_order')) {
+    db.exec(
+      `ALTER TABLE last_download ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`,
+    )
+  }
 }
 
 export function openLastDownloadDb() {
@@ -42,9 +55,11 @@ export function openLastDownloadDb() {
       item_iso TEXT NOT NULL,
       item_id TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
-      saved_at TEXT NOT NULL
+      saved_at TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
     )
   `)
+  ensureSortOrderColumn(db)
   return db
 }
 
@@ -66,6 +81,7 @@ function rowToRecord(row: {
   item_id: string
   timestamp: number
   saved_at: string
+  sort_order: number
 }): LastDownloadRecord {
   return {
     query: row.query,
@@ -76,6 +92,7 @@ function rowToRecord(row: {
     id: row.item_id,
     timestamp: row.timestamp,
     savedAt: row.saved_at,
+    sortOrder: row.sort_order,
   }
 }
 
@@ -86,7 +103,7 @@ export function getLastDownload(rawQuery: string) {
   }
   const row = openLastDownloadDb()
     .prepare(
-      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at
+      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
        FROM last_download
        WHERE query = ?`,
     )
@@ -100,6 +117,7 @@ export function getLastDownload(rawQuery: string) {
         item_id: string
         timestamp: number
         saved_at: string
+        sort_order: number
       }
     | undefined
   return row ? rowToRecord(row) : null
@@ -108,9 +126,9 @@ export function getLastDownload(rawQuery: string) {
 export function listLastDownloads() {
   const rows = openLastDownloadDb()
     .prepare(
-      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at
+      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
        FROM last_download
-       ORDER BY timestamp DESC, saved_at DESC`,
+       ORDER BY sort_order ASC, timestamp DESC, saved_at DESC`,
     )
     .all() as {
     query: string
@@ -121,6 +139,7 @@ export function listLastDownloads() {
     item_id: string
     timestamp: number
     saved_at: string
+    sort_order: number
   }[]
   return rows.map(rowToRecord)
 }
@@ -165,6 +184,10 @@ export function parseLastDownloadInput(payload: unknown) {
     iso: iso.slice(0, 40) || new Date(timestamp * 1000).toISOString(),
     id: id.slice(0, 32),
     timestamp: Math.trunc(timestamp),
+    sortOrder:
+      typeof source.sortOrder === 'number' && Number.isFinite(source.sortOrder)
+        ? Math.trunc(source.sortOrder)
+        : 0,
   }
 }
 
@@ -184,8 +207,8 @@ export function upsertLastDownload(input: ReturnType<typeof parseLastDownloadInp
   openLastDownloadDb()
     .prepare(
       `INSERT INTO last_download (
-         query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(query) DO UPDATE SET
          title = excluded.title,
          title_ko = excluded.title_ko,
@@ -204,6 +227,26 @@ export function upsertLastDownload(input: ReturnType<typeof parseLastDownloadInp
       input.id,
       input.timestamp,
       savedAt,
+      input.sortOrder,
     )
   return getLastDownload(input.query)
+}
+
+export function updateLastDownloadSortOrder(rawQuery: string, sortOrder: unknown) {
+  const query = queryKey(rawQuery)
+  if (!query) {
+    throw new SearchError('검색어가 없어요.', 400)
+  }
+  const parsed =
+    typeof sortOrder === 'number' ? sortOrder : Number(sortOrder)
+  if (!Number.isFinite(parsed) || parsed < -1_000_000 || parsed > 1_000_000) {
+    throw new SearchError('오더 번호는 -1000000부터 1000000 사이여야 해요.', 400)
+  }
+  const info = openLastDownloadDb()
+    .prepare(`UPDATE last_download SET sort_order = ? WHERE query = ?`)
+    .run(Math.trunc(parsed), query)
+  if (Number(info.changes) === 0) {
+    throw new SearchError('저장된 검색어를 찾지 못했어요.', 404)
+  }
+  return getLastDownload(query)
 }

@@ -16,6 +16,7 @@ import {
   getLastDownload,
   listLastDownloads,
   parseLastDownloadInput,
+  updateLastDownloadSortOrder,
   upsertLastDownload,
 } from './server/last-download-db.ts'
 import {
@@ -237,9 +238,31 @@ function localApiPlugin(): Plugin {
             return
           }
 
+          if (req.method === 'PATCH') {
+            try {
+              const parsed: unknown = JSON.parse((await readBody(req)) || '{}')
+              const source = (parsed ?? {}) as Record<string, unknown>
+              const record = updateLastDownloadSortOrder(
+                url.searchParams.get('q') ?? (typeof source.query === 'string' ? source.query : ''),
+                typeof source.sortOrder === 'number' || typeof source.sortOrder === 'string'
+                  ? source.sortOrder
+                  : url.searchParams.get('sortOrder'),
+              )
+              sendJson(res, 200, { record })
+            } catch (cause) {
+              const status = cause instanceof SearchError ? cause.status : 500
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '오더 번호를 저장하지 못했어요.'
+              sendJson(res, status, { error: message })
+            }
+            return
+          }
+
           if (req.method !== 'PUT' && req.method !== 'POST') {
             res.statusCode = 405
-            res.setHeader('Allow', 'GET, PUT, POST, DELETE')
+            res.setHeader('Allow', 'GET, PUT, POST, PATCH, DELETE')
             res.end()
             return
           }

@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { queryKey, type LastDownloadRecord } from '@/lib/last-download'
 
 function queryKoOf(
@@ -11,6 +12,8 @@ function queryKoOf(
   return translated && translated !== query ? translated : null
 }
 
+export type SavedQuerySortMode = 'date' | 'order'
+
 export function SavedQueriesDialog({
   open,
   items,
@@ -18,9 +21,11 @@ export function SavedQueriesDialog({
   loading,
   error,
   deletingQuery,
+  updatingOrderQuery,
   onClose,
   onPick,
   onDelete,
+  onUpdateOrder,
 }: {
   open: boolean
   items: LastDownloadRecord[]
@@ -28,10 +33,14 @@ export function SavedQueriesDialog({
   loading: boolean
   error: string | null
   deletingQuery: string | null
+  updatingOrderQuery: string | null
   onClose: () => void
   onPick: (record: LastDownloadRecord) => void
   onDelete: (record: LastDownloadRecord) => void
+  onUpdateOrder: (record: LastDownloadRecord, sortOrder: number) => void
 }) {
+  const [sortMode, setSortMode] = useState<SavedQuerySortMode>('date')
+
   useEffect(() => {
     if (!open) {
       return
@@ -44,6 +53,18 @@ export function SavedQueriesDialog({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  const sortedItems = useMemo(() => {
+    const copy = [...items]
+    if (sortMode === 'order') {
+      copy.sort(
+        (a, b) => a.sortOrder - b.sortOrder || b.timestamp - a.timestamp,
+      )
+    } else {
+      copy.sort((a, b) => b.timestamp - a.timestamp)
+    }
+    return copy
+  }, [items, sortMode])
 
   if (!open) {
     return null
@@ -64,14 +85,39 @@ export function SavedQueriesDialog({
         className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border bg-card shadow-lg"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b p-4">
+        <div className="space-y-2 border-b p-4">
           <h2 id="saved-queries-title" className="font-heading text-lg">
             저장된 검색어
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             토렌트를 받았던 검색어와 마지막 글입니다. 제목을 고르면 검색창과
             시작일에 넣습니다. 삭제는 오른쪽 버튼으로만 합니다.
           </p>
+          <div className="flex items-center gap-2 text-sm">
+            <label
+              htmlFor="saved-query-sort"
+              className="shrink-0 font-medium text-muted-foreground"
+            >
+              정렬
+            </label>
+            <select
+              id="saved-query-sort"
+              data-testid="saved-query-sort"
+              value={sortMode}
+              onChange={(event) =>
+                setSortMode(event.target.value as SavedQuerySortMode)
+              }
+              className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <option value="date">날짜별 (최근순)</option>
+              <option value="order">오더번호별</option>
+            </select>
+            {sortMode === 'order' ? (
+              <span className="text-xs text-muted-foreground">
+                오더 번호가 작은 순서로 나열합니다.
+              </span>
+            ) : null}
+          </div>
         </div>
         {error ? (
           <p
@@ -84,7 +130,7 @@ export function SavedQueriesDialog({
         <ul className="min-h-0 flex-1 overflow-y-auto divide-y">
           {loading ? (
             <li className="p-4 text-sm text-muted-foreground">불러오는 중…</li>
-          ) : items.length === 0 ? (
+          ) : sortedItems.length === 0 ? (
             <li
               data-testid="saved-queries-empty"
               className="p-4 text-sm text-muted-foreground"
@@ -92,59 +138,17 @@ export function SavedQueriesDialog({
               저장된 검색어가 없어요. 토렌트를 받으면 검색어가 여기에 남습니다.
             </li>
           ) : (
-            items.map((item) => (
-              <li key={item.query} className="flex items-stretch">
-                <button
-                  type="button"
-                  data-testid={`saved-query-${item.query}`}
-                  className="flex min-w-0 flex-1 flex-col items-start gap-1 p-4 text-left hover:bg-muted/60"
-                  onClick={() => onPick(item)}
-                >
-                  <p className="font-medium">
-                    {item.query}
-                    {queryKoOf(queryKoMap, item.query) ? (
-                      <span
-                        data-testid={`saved-query-ko-${item.query}`}
-                        className="ml-1.5 align-middle text-xs font-normal text-muted-foreground"
-                      >
-                        ({queryKoOf(queryKoMap, item.query)})
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    마지막 날짜 {item.date}
-                  </p>
-                  <p className="leading-snug">{item.titleKo}</p>
-                  {item.titleKo !== item.title ? (
-                    <p className="break-all text-xs text-muted-foreground">
-                      {item.title}
-                    </p>
-                  ) : null}
-                </button>
-                <div className="flex shrink-0 items-center border-l px-3">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    data-testid={`saved-query-delete-${item.query}`}
-                    disabled={deletingQuery === item.query}
-                    aria-label={`${item.query} 검색어 삭제`}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      const ok = window.confirm(
-                        `“${item.query}” 검색어를 삭제할까요?\n마지막 받은 글 기록도 함께 지워집니다.`,
-                      )
-                      if (!ok) {
-                        return
-                      }
-                      onDelete(item)
-                    }}
-                  >
-                    {deletingQuery === item.query ? '지우는 중…' : '삭제'}
-                  </Button>
-                </div>
-              </li>
+            sortedItems.map((item) => (
+              <SavedQueryRow
+                key={`${item.query}:${item.sortOrder}`}
+                item={item}
+                queryKo={queryKoOf(queryKoMap, item.query)}
+                deleting={deletingQuery === item.query}
+                updatingOrder={updatingOrderQuery === item.query}
+                onPick={onPick}
+                onDelete={onDelete}
+                onUpdateOrder={onUpdateOrder}
+              />
             ))
           )}
         </ul>
@@ -160,5 +164,115 @@ export function SavedQueriesDialog({
         </div>
       </div>
     </div>
+  )
+}
+
+function SavedQueryRow({
+  item,
+  queryKo,
+  deleting,
+  updatingOrder,
+  onPick,
+  onDelete,
+  onUpdateOrder,
+}: {
+  item: LastDownloadRecord
+  queryKo: string | null
+  deleting: boolean
+  updatingOrder: boolean
+  onPick: (record: LastDownloadRecord) => void
+  onDelete: (record: LastDownloadRecord) => void
+  onUpdateOrder: (record: LastDownloadRecord, sortOrder: number) => void
+}) {
+  const [orderDraft, setOrderDraft] = useState(String(item.sortOrder))
+
+  function commitOrder() {
+    const next = Number.parseInt(orderDraft, 10)
+    if (Number.isFinite(next) && next !== item.sortOrder) {
+      onUpdateOrder(item, next)
+      return
+    }
+    setOrderDraft(String(item.sortOrder))
+  }
+
+  return (
+    <li className="flex items-stretch">
+      <button
+        type="button"
+        data-testid={`saved-query-${item.query}`}
+        className="flex min-w-0 flex-1 flex-col items-start gap-1 p-4 text-left hover:bg-muted/60"
+        onClick={() => onPick(item)}
+      >
+        <p className="font-medium">
+          {item.query}
+          {queryKo ? (
+            <span
+              data-testid={`saved-query-ko-${item.query}`}
+              className="ml-1.5 align-middle text-xs font-normal text-muted-foreground"
+            >
+              ({queryKo})
+            </span>
+          ) : null}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          마지막 날짜 {item.date}
+        </p>
+        <p className="leading-snug">{item.titleKo}</p>
+        {item.titleKo !== item.title ? (
+          <p className="break-all text-xs text-muted-foreground">
+            {item.title}
+          </p>
+        ) : null}
+      </button>
+      <div className="flex shrink-0 flex-col items-center justify-center gap-2 border-l px-3">
+        <label
+          htmlFor={`saved-query-order-${item.query}`}
+          className="text-[10px] font-medium leading-none text-muted-foreground"
+        >
+          오더
+        </label>
+        <Input
+          id={`saved-query-order-${item.query}`}
+          type="number"
+          inputMode="numeric"
+          step={1}
+          value={orderDraft}
+          data-testid={`saved-query-order-${item.query}`}
+          aria-label={`${item.query} 오더 번호`}
+          title="정렬에 쓰는 오더 번호. 바꾸고 엔터나 바깥 클릭으로 저장합니다."
+          disabled={updatingOrder}
+          onChange={(event) => setOrderDraft(event.target.value)}
+          onBlur={commitOrder}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              event.currentTarget.blur()
+            }
+          }}
+          className="h-8 w-16 text-center"
+        />
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          data-testid={`saved-query-delete-${item.query}`}
+          disabled={deleting}
+          aria-label={`${item.query} 검색어 삭제`}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            const ok = window.confirm(
+              `“${item.query}” 검색어를 삭제할까요?\n마지막 받은 글 기록도 함께 지워집니다.`,
+            )
+            if (!ok) {
+              return
+            }
+            onDelete(item)
+          }}
+        >
+          {deleting ? '지우는 중…' : '삭제'}
+        </Button>
+      </div>
+    </li>
   )
 }

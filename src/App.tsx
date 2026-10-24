@@ -23,6 +23,7 @@ import {
   fetchLastDownloads,
   queryKey,
   saveLastDownload,
+  updateLastDownloadSortOrder,
   type LastDownloadRecord,
 } from '@/lib/last-download'
 import {
@@ -134,6 +135,9 @@ export default function App() {
   const [savedLoading, setSavedLoading] = useState(false)
   const [savedError, setSavedError] = useState<string | null>(null)
   const [deletingQuery, setDeletingQuery] = useState<string | null>(null)
+  const [updatingOrderQuery, setUpdatingOrderQuery] = useState<string | null>(
+    null,
+  )
   const [queryKoMap, setQueryKoMap] = useState<Record<string, string>>({})
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
@@ -490,6 +494,37 @@ export default function App() {
       )
     } finally {
       setDeletingQuery(null)
+    }
+  }
+
+  async function handleUpdateOrder(
+    record: LastDownloadRecord,
+    sortOrder: number,
+  ) {
+    setUpdatingOrderQuery(record.query)
+    setSavedError(null)
+    try {
+      const updated = await updateLastDownloadSortOrder(
+        record.query,
+        sortOrder,
+      )
+      const rows = await fetchLastDownloads()
+      setSavedQueries(rows)
+      if (
+        updated &&
+        lastDownload &&
+        queryKey(lastDownload.query) === queryKey(record.query)
+      ) {
+        setLastDownload(updated)
+      }
+    } catch (cause) {
+      setSavedError(
+        cause instanceof Error
+          ? cause.message
+          : '오더 번호를 저장하지 못했어요.',
+      )
+    } finally {
+      setUpdatingOrderQuery(null)
     }
   }
 
@@ -1053,9 +1088,13 @@ export default function App() {
         loading={savedLoading}
         error={savedError}
         deletingQuery={deletingQuery}
+        updatingOrderQuery={updatingOrderQuery}
         onClose={() => setSavedOpen(false)}
         onPick={applySavedQuery}
         onDelete={(record) => void handleDeleteSavedQuery(record)}
+        onUpdateOrder={(record, sortOrder) =>
+          void handleUpdateOrder(record, sortOrder)
+        }
       />
     </div>
   )
