@@ -2,6 +2,12 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { PendingTorrent } from '@/lib/pending'
 
+function queryKoOf(queryKoMap: Record<string, string>, raw: string) {
+  const query = raw.trim().normalize('NFC')
+  const translated = query ? queryKoMap[query] : undefined
+  return translated && translated !== query ? translated : null
+}
+
 export function QbitPromptDialog({
   open,
   count,
@@ -71,6 +77,7 @@ export function QbitPromptDialog({
 export function PendingQbitDialog({
   open,
   items,
+  queryKoMap,
   selected,
   busy,
   error,
@@ -82,6 +89,7 @@ export function PendingQbitDialog({
 }: {
   open: boolean
   items: PendingTorrent[]
+  queryKoMap: Record<string, string>
   selected: Set<number>
   busy: boolean
   error: string | null
@@ -158,7 +166,16 @@ export function PendingQbitDialog({
                     </p>
                   ) : null}
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {item.query} · {item.date}
+                    {item.query}
+                    {queryKoOf(queryKoMap, item.query) ? (
+                      <span
+                        data-testid={`pending-query-ko-${item.id}`}
+                        className="ml-1.5"
+                      >
+                        ({queryKoOf(queryKoMap, item.query)})
+                      </span>
+                    ) : null}{' '}
+                    · {item.date}
                   </p>
                 </div>
               </li>

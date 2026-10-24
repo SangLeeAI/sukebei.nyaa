@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -39,7 +39,7 @@ import {
   todayYmd,
 } from '@/lib/since'
 import { downloadSelectedTorrents } from '@/lib/torrents'
-import { translateTexts } from '@/lib/translate'
+import { isMostlyKorean, translateTexts } from '@/lib/translate'
 import { cn } from '@/lib/utils'
 
 const TRANSLATE_CHUNK = 20
@@ -134,9 +134,12 @@ export default function App() {
   const [savedLoading, setSavedLoading] = useState(false)
   const [savedError, setSavedError] = useState<string | null>(null)
   const [deletingQuery, setDeletingQuery] = useState<string | null>(null)
+  const [queryKoMap, setQueryKoMap] = useState<Record<string, string>>({})
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
   const downloadAbortRef = useRef<AbortController | null>(null)
+  const queryKoRef = useRef<Record<string, string>>({})
+  const queryKoInflight = useRef<Set<string>>(new Set())
   const minSeeders = parseMinSeeders(seedDraft)
 
   const fetchedItems = result?.items ?? []
@@ -166,6 +169,75 @@ export default function App() {
     lastDownload && queryKey(lastDownload.query) === queryKey(draft)
       ? lastDownload
       : null
+
+  const ensureQueryKo = useCallback((raw: string) => {
+    const query = queryKey(raw)
+    if (!query || isMostlyKorean(query)) {
+      return
+    }
+    if (queryKoRef.current[query] || queryKoInflight.current.has(query)) {
+      return
+    }
+    const controller = new AbortController()
+    queryKoInflight.current.add(query)
+    void translateTexts([query], controller.signal)
+      .then((next) => {
+        const translated = next[0]?.trim() ?? ''
+        if (
+          controller.signal.aborted ||
+          !translated ||
+          translated === query
+        ) {
+          return
+        }
+        if (queryKoRef.current[query] === translated) {
+          return
+        }
+        queryKoRef.current[query] = translated
+        setQueryKoMap({ ...queryKoRef.current })
+      })
+      .catch(() => {})
+      .finally(() => {
+        queryKoInflight.current.delete(query)
+      })
+  }, [])
+
+  function queryKoOf(raw: string) {
+    const query = queryKey(raw)
+    const translated = query ? queryKoMap[query] : undefined
+    return translated && translated !== query ? translated : null
+  }
+
+  useEffect(() => {
+    const query = queryKey(draft)
+    if (!query || isMostlyKorean(query)) {
+      return
+    }
+    if (queryKoMap[query] || queryKoInflight.current.has(query)) {
+      return
+    }
+    const timer = window.setTimeout(() => ensureQueryKo(draft), 300)
+    return () => window.clearTimeout(timer)
+  }, [draft, queryKoMap, ensureQueryKo])
+
+  useEffect(() => {
+    if (!result) {
+      return
+    }
+    ensureQueryKo(result.query)
+  }, [result, ensureQueryKo])
+
+  useEffect(() => {
+    for (const item of savedQueries) {
+      ensureQueryKo(item.query)
+    }
+  }, [savedQueries, ensureQueryKo])
+
+  useEffect(() => {
+    for (const item of pendingItems) {
+      ensureQueryKo(item.query)
+    }
+  }, [pendingItems, ensureQueryKo])
 
   function clearSelection() {
     setSelected(new Set())
@@ -730,6 +802,16 @@ export default function App() {
             </Button>
           </form>
 
+          {queryKoOf(draft) ? (
+            <p
+              data-testid="query-translation"
+              className="text-sm text-muted-foreground"
+            >
+              <span className="font-medium text-foreground">{draft.trim()}</span>{' '}
+              → {queryKoOf(draft)}
+            </p>
+          ) : null}
+
           {matchingLastDownload ? (
             <div
               data-testid="last-download-card"
@@ -807,7 +889,8 @@ export default function App() {
           <div className="rounded-xl border border-dashed bg-card px-4 py-16 text-center">
             <p className="font-medium">시작일 이후 맞는 결과가 없어요</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-              “{result.query}”에 해당하는 글이 {result.since}부터 오늘 사이에 없거나,
+              “{result.query}”{queryKoOf(result.query) ? ` (${queryKoOf(result.query)})` : ''}
+              에 해당하는 글이 {result.since}부터 오늘 사이에 없거나,
               더 오래됐어요. 시작일을 앞당기거나 다른 검색어를 시도해 보세요.
             </p>
           </div>
@@ -829,6 +912,14 @@ export default function App() {
               <div>
                 <h2 className="font-heading text-lg">
                   “{result.query}” {result.since} – 오늘
+                  {queryKoOf(result.query) ? (
+                    <span
+                      data-testid="result-query-translation"
+                      className="ml-2 align-middle text-sm font-normal text-muted-foreground"
+                    >
+                      {queryKoOf(result.query)}
+                    </span>
+                  ) : null}
                 </h2>
                 <p className="text-sm text-muted-foreground">{summary}</p>
               </div>
@@ -924,6 +1015,7 @@ export default function App() {
       <PendingQbitDialog
         open={pendingOpen}
         items={pendingItems}
+        queryKoMap={queryKoMap}
         selected={pendingSelected}
         busy={qbitBusy}
         error={qbitError}
@@ -957,6 +1049,7 @@ export default function App() {
       <SavedQueriesDialog
         open={savedOpen}
         items={savedQueries}
+        queryKoMap={queryKoMap}
         loading={savedLoading}
         error={savedError}
         deletingQuery={deletingQuery}

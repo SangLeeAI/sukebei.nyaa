@@ -1,3 +1,12 @@
+export function isMostlyKorean(text: string) {
+  const letters = text.match(/\p{L}/gu) ?? []
+  if (letters.length === 0) {
+    return true
+  }
+  const hangul = text.match(/\p{Script=Hangul}/gu) ?? []
+  return hangul.length / letters.length >= 0.55
+}
+
 export async function translateTexts(texts: string[], signal?: AbortSignal) {
   if (texts.length === 0) {
     return []

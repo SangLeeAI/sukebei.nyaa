@@ -1,10 +1,20 @@
 import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import type { LastDownloadRecord } from '@/lib/last-download'
+import { queryKey, type LastDownloadRecord } from '@/lib/last-download'
+
+function queryKoOf(
+  queryKoMap: Record<string, string>,
+  raw: string,
+) {
+  const query = queryKey(raw)
+  const translated = query ? queryKoMap[query] : undefined
+  return translated && translated !== query ? translated : null
+}
 
 export function SavedQueriesDialog({
   open,
   items,
+  queryKoMap,
   loading,
   error,
   deletingQuery,
@@ -14,6 +24,7 @@ export function SavedQueriesDialog({
 }: {
   open: boolean
   items: LastDownloadRecord[]
+  queryKoMap: Record<string, string>
   loading: boolean
   error: string | null
   deletingQuery: string | null
@@ -89,7 +100,17 @@ export function SavedQueriesDialog({
                   className="flex min-w-0 flex-1 flex-col items-start gap-1 p-4 text-left hover:bg-muted/60"
                   onClick={() => onPick(item)}
                 >
-                  <p className="font-medium">{item.query}</p>
+                  <p className="font-medium">
+                    {item.query}
+                    {queryKoOf(queryKoMap, item.query) ? (
+                      <span
+                        data-testid={`saved-query-ko-${item.query}`}
+                        className="ml-1.5 align-middle text-xs font-normal text-muted-foreground"
+                      >
+                        ({queryKoOf(queryKoMap, item.query)})
+                      </span>
+                    ) : null}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     마지막 날짜 {item.date}
                   </p>
