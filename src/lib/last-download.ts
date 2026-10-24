@@ -8,6 +8,7 @@ export type LastDownloadRecord = {
   timestamp: number
   savedAt: string
   sortOrder: number
+  note: string
 }
 
 export function queryKey(raw: string) {
@@ -47,6 +48,7 @@ function asRecordFromRow(row: Record<string, unknown>): LastDownloadRecord | nul
     timestamp: typeof row.timestamp === 'number' ? row.timestamp : 0,
     savedAt: typeof row.savedAt === 'string' ? row.savedAt : '',
     sortOrder: typeof row.sortOrder === 'number' ? row.sortOrder : 0,
+    note: typeof row.note === 'string' ? row.note : '',
   }
 }
 
@@ -155,6 +157,30 @@ export async function updateLastDownloadSortOrder(
       headers: { 'Content-Type': 'application/json' },
       signal,
       body: JSON.stringify({ query: trimmed, sortOrder }),
+    },
+  )
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  return asRecord(await response.json())
+}
+
+export async function updateLastDownloadNote(
+  query: string,
+  note: string,
+  signal?: AbortSignal,
+) {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    throw new Error('검색어가 없어요.')
+  }
+  const response = await fetch(
+    `/api/last-download?q=${encodeURIComponent(trimmed)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({ query: trimmed, note }),
     },
   )
   if (!response.ok) {

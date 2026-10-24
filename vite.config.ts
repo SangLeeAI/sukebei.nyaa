@@ -16,6 +16,7 @@ import {
   getLastDownload,
   listLastDownloads,
   parseLastDownloadInput,
+  updateLastDownloadNote,
   updateLastDownloadSortOrder,
   upsertLastDownload,
 } from './server/last-download-db.ts'
@@ -242,19 +243,28 @@ function localApiPlugin(): Plugin {
             try {
               const parsed: unknown = JSON.parse((await readBody(req)) || '{}')
               const source = (parsed ?? {}) as Record<string, unknown>
-              const record = updateLastDownloadSortOrder(
-                url.searchParams.get('q') ?? (typeof source.query === 'string' ? source.query : ''),
-                typeof source.sortOrder === 'number' || typeof source.sortOrder === 'string'
-                  ? source.sortOrder
-                  : url.searchParams.get('sortOrder'),
-              )
+              const patchQuery =
+                url.searchParams.get('q') ??
+                (typeof source.query === 'string' ? source.query : '')
+              let record = null
+              if ('note' in source) {
+                record = updateLastDownloadNote(patchQuery, source.note)
+              } else {
+                record = updateLastDownloadSortOrder(
+                  patchQuery,
+                  typeof source.sortOrder === 'number' ||
+                    typeof source.sortOrder === 'string'
+                    ? source.sortOrder
+                    : url.searchParams.get('sortOrder'),
+                )
+              }
               sendJson(res, 200, { record })
             } catch (cause) {
               const status = cause instanceof SearchError ? cause.status : 500
               const message =
                 cause instanceof Error
                   ? cause.message
-                  : '오더 번호를 저장하지 못했어요.'
+                  : '저장하지 못했어요.'
               sendJson(res, status, { error: message })
             }
             return

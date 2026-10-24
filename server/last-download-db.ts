@@ -8,6 +8,7 @@ export const DB_PATH = path.resolve(import.meta.dirname, '../data/nyaa.sqlite')
 
 const QUERY_MAX = 200
 const TITLE_MAX = 500
+const NOTE_MAX = 500
 const YMD = /^(\d{4})-(\d{2})-(\d{2})$/
 
 export type LastDownloadRecord = {
@@ -20,6 +21,7 @@ export type LastDownloadRecord = {
   timestamp: number
   savedAt: string
   sortOrder: number
+  note: string
 }
 
 let db: DatabaseSync | null = null
@@ -28,7 +30,7 @@ export function queryKey(raw: string) {
   return raw.trim().normalize('NFC')
 }
 
-function ensureSortOrderColumn(db: DatabaseSync) {
+function ensureColumns(db: DatabaseSync) {
   const columns = db.prepare(`PRAGMA table_info(last_download)`).all() as {
     name?: unknown
   }[]
@@ -37,6 +39,9 @@ function ensureSortOrderColumn(db: DatabaseSync) {
     db.exec(
       `ALTER TABLE last_download ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`,
     )
+  }
+  if (!names.includes('note')) {
+    db.exec(`ALTER TABLE last_download ADD COLUMN note TEXT NOT NULL DEFAULT ''`)
   }
 }
 
@@ -56,10 +61,11 @@ export function openLastDownloadDb() {
       item_id TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
       saved_at TEXT NOT NULL,
-      sort_order INTEGER NOT NULL DEFAULT 0
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT ''
     )
   `)
-  ensureSortOrderColumn(db)
+  ensureColumns(db)
   return db
 }
 
@@ -82,6 +88,7 @@ function rowToRecord(row: {
   timestamp: number
   saved_at: string
   sort_order: number
+  note: string
 }): LastDownloadRecord {
   return {
     query: row.query,
@@ -93,6 +100,7 @@ function rowToRecord(row: {
     timestamp: row.timestamp,
     savedAt: row.saved_at,
     sortOrder: row.sort_order,
+    note: row.note,
   }
 }
 
@@ -103,7 +111,7 @@ export function getLastDownload(rawQuery: string) {
   }
   const row = openLastDownloadDb()
     .prepare(
-      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
+      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order, note
        FROM last_download
        WHERE query = ?`,
     )
@@ -118,6 +126,7 @@ export function getLastDownload(rawQuery: string) {
         timestamp: number
         saved_at: string
         sort_order: number
+        note: string
       }
     | undefined
   return row ? rowToRecord(row) : null
@@ -126,7 +135,7 @@ export function getLastDownload(rawQuery: string) {
 export function listLastDownloads() {
   const rows = openLastDownloadDb()
     .prepare(
-      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
+      `SELECT query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order, note
        FROM last_download
        ORDER BY sort_order ASC, timestamp DESC, saved_at DESC`,
     )
@@ -140,6 +149,7 @@ export function listLastDownloads() {
     timestamp: number
     saved_at: string
     sort_order: number
+    note: string
   }[]
   return rows.map(rowToRecord)
 }
@@ -188,6 +198,8 @@ export function parseLastDownloadInput(payload: unknown) {
       typeof source.sortOrder === 'number' && Number.isFinite(source.sortOrder)
         ? Math.trunc(source.sortOrder)
         : 0,
+    note:
+      typeof source.note === 'string' ? source.note.trim().slice(0, NOTE_MAX) : '',
   }
 }
 
@@ -207,8 +219,8 @@ export function upsertLastDownload(input: ReturnType<typeof parseLastDownloadInp
   openLastDownloadDb()
     .prepare(
       `INSERT INTO last_download (
-         query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         query, title, title_ko, item_date, item_iso, item_id, timestamp, saved_at, sort_order, note
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(query) DO UPDATE SET
          title = excluded.title,
          title_ko = excluded.title_ko,
@@ -228,6 +240,7 @@ export function upsertLastDownload(input: ReturnType<typeof parseLastDownloadInp
       input.timestamp,
       savedAt,
       input.sortOrder,
+      input.note,
     )
   return getLastDownload(input.query)
 }
@@ -245,6 +258,22 @@ export function updateLastDownloadSortOrder(rawQuery: string, sortOrder: unknown
   const info = openLastDownloadDb()
     .prepare(`UPDATE last_download SET sort_order = ? WHERE query = ?`)
     .run(Math.trunc(parsed), query)
+  if (Number(info.changes) === 0) {
+    throw new SearchError('저장된 검색어를 찾지 못했어요.', 404)
+  }
+  return getLastDownload(query)
+}
+
+export function updateLastDownloadNote(rawQuery: string, note: unknown) {
+  const query = queryKey(rawQuery)
+  if (!query) {
+    throw new SearchError('검색어가 없어요.', 400)
+  }
+  const next =
+    typeof note === 'string' ? note.trim().slice(0, NOTE_MAX) : ''
+  const info = openLastDownloadDb()
+    .prepare(`UPDATE last_download SET note = ? WHERE query = ?`)
+    .run(next, query)
   if (Number(info.changes) === 0) {
     throw new SearchError('저장된 검색어를 찾지 못했어요.', 404)
   }

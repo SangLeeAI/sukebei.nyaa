@@ -23,6 +23,7 @@ import {
   fetchLastDownloads,
   queryKey,
   saveLastDownload,
+  updateLastDownloadNote,
   updateLastDownloadSortOrder,
   type LastDownloadRecord,
 } from '@/lib/last-download'
@@ -138,6 +139,10 @@ export default function App() {
   const [updatingOrderQuery, setUpdatingOrderQuery] = useState<string | null>(
     null,
   )
+  const [updatingNoteQuery, setUpdatingNoteQuery] = useState<string | null>(
+    null,
+  )
+  const [noteError, setNoteError] = useState<string | null>(null)
   const [queryKoMap, setQueryKoMap] = useState<Record<string, string>>({})
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
@@ -528,6 +533,31 @@ export default function App() {
     }
   }
 
+  async function handleUpdateNote(record: LastDownloadRecord, note: string) {
+    setUpdatingNoteQuery(record.query)
+    setNoteError(null)
+    try {
+      const updated = await updateLastDownloadNote(record.query, note)
+      const rows = await fetchLastDownloads()
+      setSavedQueries(rows)
+      if (
+        updated &&
+        lastDownload &&
+        queryKey(lastDownload.query) === queryKey(record.query)
+      ) {
+        setLastDownload(updated)
+      }
+    } catch (cause) {
+      setNoteError(
+        cause instanceof Error
+          ? cause.message
+          : '비고를 저장하지 못했어요.',
+      )
+    } finally {
+      setUpdatingNoteQuery(null)
+    }
+  }
+
   async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
     const query = raw.trim()
     if (!query) {
@@ -872,6 +902,14 @@ export default function App() {
                   {formatDate(matchingLastDownload.iso)} · 시작일로 넣으면 이 날짜부터
                   다시 찾습니다.
                 </p>
+                <QueryNoteInput
+                  key={`${matchingLastDownload.query}:${matchingLastDownload.note}`}
+                  record={matchingLastDownload}
+                  saving={updatingNoteQuery === matchingLastDownload.query}
+                  onSave={(note) =>
+                    void handleUpdateNote(matchingLastDownload, note)
+                  }
+                />
               </div>
               <Button
                 type="button"
@@ -886,6 +924,16 @@ export default function App() {
                 이 날짜를 시작일로
               </Button>
             </div>
+          ) : null}
+
+          {noteError ? (
+            <p
+              role="alert"
+              data-testid="note-error"
+              className="text-sm text-destructive"
+            >
+              {noteError}
+            </p>
           ) : null}
         </header>
 
@@ -1095,6 +1143,55 @@ export default function App() {
         onUpdateOrder={(record, sortOrder) =>
           void handleUpdateOrder(record, sortOrder)
         }
+      />
+    </div>
+  )
+}
+
+function QueryNoteInput({
+  record,
+  saving,
+  onSave,
+}: {
+  record: LastDownloadRecord
+  saving: boolean
+  onSave: (note: string) => void
+}) {
+  const [noteDraft, setNoteDraft] = useState(record.note)
+
+  function commitNote() {
+    const next = noteDraft.trim()
+    if (next !== record.note) {
+      onSave(next.slice(0, 500))
+      return
+    }
+    setNoteDraft(record.note)
+  }
+
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <label
+        htmlFor="query-note"
+        className="shrink-0 text-xs font-medium text-muted-foreground"
+      >
+        비고
+      </label>
+      <Input
+        id="query-note"
+        value={noteDraft}
+        data-testid="query-note-input"
+        placeholder="이 검색어에 대한 메모 (없어도 됨)"
+        title="검색어 메모. 바꾸고 엔터나 바깥 클릭으로 저장합니다."
+        disabled={saving}
+        onChange={(event) => setNoteDraft(event.target.value)}
+        onBlur={commitNote}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            event.currentTarget.blur()
+          }
+        }}
+        className="h-8 flex-1 text-xs"
       />
     </div>
   )

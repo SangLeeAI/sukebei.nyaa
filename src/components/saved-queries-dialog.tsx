@@ -217,6 +217,14 @@ function SavedQueryRow({
         <p className="text-xs text-muted-foreground">
           마지막 날짜 {item.date}
         </p>
+        {item.note ? (
+          <p
+            data-testid={`saved-query-note-${item.query}`}
+            className="break-all text-xs italic text-muted-foreground"
+          >
+            비고: {item.note}
+          </p>
+        ) : null}
         <p className="leading-snug">{item.titleKo}</p>
         {item.titleKo !== item.title ? (
           <p className="break-all text-xs text-muted-foreground">
