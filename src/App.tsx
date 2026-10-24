@@ -29,6 +29,7 @@ import {
 } from '@/lib/last-download'
 import {
   addPendingToQbittorrent,
+  deletePendingTorrents,
   fetchPendingTorrents,
   savePendingTorrents,
   stashDownloadedTorrents,
@@ -436,6 +437,37 @@ export default function App() {
           : 'qBittorrent에 넣지 못했어요.',
       )
       return false
+    } finally {
+      setQbitBusy(false)
+    }
+  }
+
+  async function deletePendingSelection() {
+    const ids = [...pendingSelected]
+    if (ids.length === 0 || qbitBusy) {
+      return
+    }
+    const ok = window.confirm(
+      `고른 토렌트 ${ids.length}개를 미추가 목록에서 지울까요?\n보관 폴더의 토렌트 파일도 함께 지워집니다.`,
+    )
+    if (!ok) {
+      return
+    }
+    setQbitBusy(true)
+    setQbitError(null)
+    try {
+      const result = await deletePendingTorrents(ids)
+      setPendingItems(result.items)
+      setPendingSelected(new Set())
+      setDownloadNote(
+        `미추가 목록에서 토렌트 ${result.removed}개를 지웠어요.`,
+      )
+    } catch (cause) {
+      setQbitError(
+        cause instanceof Error
+          ? cause.message
+          : '미추가 목록을 지우지 못했어요.',
+      )
     } finally {
       setQbitBusy(false)
     }
@@ -1128,6 +1160,7 @@ export default function App() {
             }
           })
         }}
+        onDelete={() => void deletePendingSelection()}
       />
       <SavedQueriesDialog
         open={savedOpen}

@@ -30,7 +30,7 @@ import {
   upsertPendingTorrents,
 } from './server/pending-db.ts'
 import { addTorrentFilesToQbittorrent } from './server/qbittorrent.ts'
-import { parseStashItems, stashTorrentFiles } from './server/torrent-stash.ts'
+import { parseStashItems, removeStashedTorrentFiles, stashTorrentFiles } from './server/torrent-stash.ts'
 import { translateTexts } from './server/translate-ko.ts'
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -340,9 +340,44 @@ function localApiPlugin(): Plugin {
             return
           }
 
+          if (req.method === 'DELETE') {
+            try {
+              const ids = parsePendingIds(
+                JSON.parse((await readBody(req)) || '{}'),
+              )
+              const rows = getPendingByIds(ids)
+              if (rows.length === 0) {
+                sendJson(res, 400, { error: '고른 미추가 항목이 없어요.' })
+                return
+              }
+              const removedFiles = removeStashedTorrentFiles(
+                rows.map((row) => row.filePath),
+              )
+              const removed = deletePendingByIds(rows.map((row) => row.id))
+              sendJson(res, 200, {
+                removed,
+                removedFiles,
+                items: listPendingTorrents(),
+                count: countPendingTorrents(),
+              })
+            } catch (cause) {
+              const status = cause instanceof SearchError ? cause.status : 500
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '미추가 목록을 지우지 못했어요.'
+              sendJson(res, status, {
+                error: message,
+                items: listPendingTorrents(),
+                count: countPendingTorrents(),
+              })
+            }
+            return
+          }
+
           if (req.method !== 'POST') {
             res.statusCode = 405
-            res.setHeader('Allow', 'GET, POST')
+            res.setHeader('Allow', 'GET, POST, DELETE')
             res.end()
             return
           }

@@ -86,6 +86,7 @@ export function PendingQbitDialog({
   onSelectAll,
   onClear,
   onAdd,
+  onDelete,
 }: {
   open: boolean
   items: PendingTorrent[]
@@ -98,6 +99,7 @@ export function PendingQbitDialog({
   onSelectAll: () => void
   onClear: () => void
   onAdd: () => void
+  onDelete: () => void
 }) {
   if (!open) {
     return null
@@ -141,6 +143,17 @@ export function PendingQbitDialog({
             disabled={selectedCount === 0 || busy}
           >
             선택 해제
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            data-testid="pending-delete"
+            onClick={onDelete}
+            disabled={selectedCount === 0 || busy}
+          >
+            선택 지움
+            {selectedCount > 0 ? ` (${selectedCount})` : ''}
           </Button>
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto divide-y">

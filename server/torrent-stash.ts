@@ -144,3 +144,26 @@ export async function stashTorrentFiles(
 
   return saved
 }
+
+export function removeStashedTorrentFiles(filePaths: string[]) {
+  let removed = 0
+  for (const raw of filePaths) {
+    if (!raw || raw.includes('\0')) {
+      continue
+    }
+    const resolved = path.resolve(raw)
+    if (
+      !resolved.endsWith('.torrent') ||
+      !resolved.startsWith(`${TORRENT_STASH_DIR}${path.sep}`)
+    ) {
+      continue
+    }
+    try {
+      fs.rmSync(resolved, { force: true })
+      removed += 1
+    } catch {
+      // 파일이 없거나 지울 수 없어도 목록 삭제는 계속합니다.
+    }
+  }
+  return removed
+}

@@ -147,3 +147,29 @@ export async function addPendingToQbittorrent(
     items: asPendingList(payload),
   }
 }
+
+export async function deletePendingTorrents(
+  ids: number[],
+  signal?: AbortSignal,
+) {
+  const response = await fetch('/api/pending', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({ ids }),
+  })
+  const payload: unknown = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(await readError(response))
+  }
+  return {
+    removed:
+      payload &&
+      typeof payload === 'object' &&
+      'removed' in payload &&
+      typeof payload.removed === 'number'
+        ? payload.removed
+        : ids.length,
+    items: asPendingList(payload),
+  }
+}
