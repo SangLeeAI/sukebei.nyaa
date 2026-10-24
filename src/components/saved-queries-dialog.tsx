@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { queryKey, type LastDownloadRecord } from '@/lib/last-download'
 
@@ -26,6 +27,7 @@ export function SavedQueriesDialog({
   onPick,
   onDelete,
   onUpdateOrder,
+  onToggleWorking,
 }: {
   open: boolean
   items: LastDownloadRecord[]
@@ -38,6 +40,7 @@ export function SavedQueriesDialog({
   onPick: (record: LastDownloadRecord) => void
   onDelete: (record: LastDownloadRecord) => void
   onUpdateOrder: (record: LastDownloadRecord, sortOrder: number) => void
+  onToggleWorking: (record: LastDownloadRecord) => void
 }) {
   const [sortMode, setSortMode] = useState<SavedQuerySortMode>('date')
 
@@ -140,7 +143,7 @@ export function SavedQueriesDialog({
           ) : (
             sortedItems.map((item) => (
               <SavedQueryRow
-                key={`${item.query}:${item.sortOrder}`}
+                key={`${item.query}:${item.sortOrder}:${item.working}`}
                 item={item}
                 queryKo={queryKoOf(queryKoMap, item.query)}
                 deleting={deletingQuery === item.query}
@@ -148,6 +151,7 @@ export function SavedQueriesDialog({
                 onPick={onPick}
                 onDelete={onDelete}
                 onUpdateOrder={onUpdateOrder}
+                onToggleWorking={onToggleWorking}
               />
             ))
           )}
@@ -175,6 +179,7 @@ function SavedQueryRow({
   onPick,
   onDelete,
   onUpdateOrder,
+  onToggleWorking,
 }: {
   item: LastDownloadRecord
   queryKo: string | null
@@ -183,6 +188,7 @@ function SavedQueryRow({
   onPick: (record: LastDownloadRecord) => void
   onDelete: (record: LastDownloadRecord) => void
   onUpdateOrder: (record: LastDownloadRecord, sortOrder: number) => void
+  onToggleWorking: (record: LastDownloadRecord) => void
 }) {
   const [orderDraft, setOrderDraft] = useState(String(item.sortOrder))
 
@@ -197,6 +203,15 @@ function SavedQueryRow({
 
   return (
     <li className="flex items-stretch">
+      <div className="flex shrink-0 items-center pl-3">
+        <Checkbox
+          data-testid={`saved-query-working-${item.query}`}
+          checked={item.working}
+          disabled={updatingOrder || deleting}
+          onCheckedChange={() => onToggleWorking(item)}
+          aria-label={`${item.query} 작업중 표시`}
+        />
+      </div>
       <button
         type="button"
         data-testid={`saved-query-${item.query}`}
@@ -205,6 +220,14 @@ function SavedQueryRow({
       >
         <p className="font-medium">
           {item.query}
+          {item.working ? (
+            <span
+              data-testid={`saved-query-working-badge-${item.query}`}
+              className="ml-1.5 align-middle text-xs font-semibold text-primary"
+            >
+              ● 작업중
+            </span>
+          ) : null}
           {queryKo ? (
             <span
               data-testid={`saved-query-ko-${item.query}`}

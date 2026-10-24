@@ -18,6 +18,7 @@ import {
   parseLastDownloadInput,
   updateLastDownloadNote,
   updateLastDownloadSortOrder,
+  updateLastDownloadWorking,
   upsertLastDownload,
 } from './server/last-download-db.ts'
 import {
@@ -249,6 +250,8 @@ function localApiPlugin(): Plugin {
               let record = null
               if ('note' in source) {
                 record = updateLastDownloadNote(patchQuery, source.note)
+              } else if ('working' in source) {
+                record = updateLastDownloadWorking(patchQuery, source.working)
               } else {
                 record = updateLastDownloadSortOrder(
                   patchQuery,

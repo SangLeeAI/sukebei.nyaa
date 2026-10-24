@@ -25,6 +25,7 @@ import {
   saveLastDownload,
   updateLastDownloadNote,
   updateLastDownloadSortOrder,
+  updateLastDownloadWorking,
   type LastDownloadRecord,
 } from '@/lib/last-download'
 import {
@@ -144,6 +145,7 @@ export default function App() {
     null,
   )
   const [noteError, setNoteError] = useState<string | null>(null)
+  const [workingBusyQuery, setWorkingBusyQuery] = useState<string | null>(null)
   const [queryKoMap, setQueryKoMap] = useState<Record<string, string>>({})
   const abortRef = useRef<AbortController | null>(null)
   const translateAbortRef = useRef<AbortController | null>(null)
@@ -590,6 +592,34 @@ export default function App() {
     }
   }
 
+  async function handleToggleWorking(record: LastDownloadRecord) {
+    setWorkingBusyQuery(record.query)
+    setNoteError(null)
+    try {
+      const updated = await updateLastDownloadWorking(
+        record.query,
+        !record.working,
+      )
+      const rows = await fetchLastDownloads()
+      setSavedQueries(rows)
+      if (
+        updated &&
+        lastDownload &&
+        queryKey(lastDownload.query) === queryKey(record.query)
+      ) {
+        setLastDownload(updated)
+      }
+    } catch (cause) {
+      setNoteError(
+        cause instanceof Error
+          ? cause.message
+          : '작업중 표시를 바꾸지 못했어요.',
+      )
+    } finally {
+      setWorkingBusyQuery(null)
+    }
+  }
+
   async function runSearch(raw: string, sinceValue = resolveSince(sinceDraft)) {
     const query = raw.trim()
     if (!query) {
@@ -915,6 +945,27 @@ export default function App() {
               className="flex flex-col gap-3 rounded-xl border bg-card p-3 sm:flex-row sm:items-start sm:justify-between"
             >
               <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    data-testid="query-working-toggle"
+                    checked={matchingLastDownload.working}
+                    disabled={workingBusyQuery === matchingLastDownload.query}
+                    onCheckedChange={() =>
+                      void handleToggleWorking(matchingLastDownload)
+                    }
+                    aria-label="이 검색어 작업중 표시"
+                  />
+                  <p
+                    className={cn(
+                      'text-xs font-medium',
+                      matchingLastDownload.working
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    작업중
+                  </p>
+                </div>
                 <p className="text-xs font-medium text-muted-foreground">
                   이 검색에서 마지막으로 받은 글 · {matchingLastDownload.date}
                 </p>
@@ -1176,6 +1227,7 @@ export default function App() {
         onUpdateOrder={(record, sortOrder) =>
           void handleUpdateOrder(record, sortOrder)
         }
+        onToggleWorking={(record) => void handleToggleWorking(record)}
       />
     </div>
   )
