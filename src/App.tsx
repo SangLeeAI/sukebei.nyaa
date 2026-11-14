@@ -1282,6 +1282,74 @@ function QueryNoteInput({
   )
 }
 
+function copyMagnetToClipboard(item: Listing, button: HTMLButtonElement) {
+  const magnetUrl = item.magnet
+  if (!magnetUrl) {
+    return
+  }
+  const write = navigator.clipboard?.writeText(magnetUrl)
+  if (write && typeof write.then === 'function') {
+    write
+      .then(() => {
+        markCopied(button)
+      })
+      .catch(() => {
+        fallbackCopyMagnet(magnetUrl, button)
+      })
+    return
+  }
+  fallbackCopyMagnet(magnetUrl, button)
+}
+
+function fallbackCopyMagnet(magnetUrl: string, button: HTMLButtonElement) {
+  try {
+    const input = document.createElement('textarea')
+    input.value = magnetUrl
+    input.setAttribute('readonly', '')
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    input.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(input)
+    if (ok) {
+      markCopied(button)
+    } else {
+      markFailed(button)
+    }
+  } catch {
+    markFailed(button)
+  }
+}
+
+function markFailed(button: HTMLButtonElement) {
+  const label = button.querySelector('[data-magnet-label]')
+  if (label) {
+    label.textContent = '복사 실패'
+  }
+  button.classList.add('text-destructive')
+  window.setTimeout(() => {
+    if (label) {
+      label.textContent = '마그넷'
+    }
+    button.classList.remove('text-destructive')
+  }, 1500)
+}
+
+function markCopied(button: HTMLButtonElement) {
+  const label = button.querySelector('[data-magnet-label]')
+  if (label) {
+    label.textContent = '복사됨'
+  }
+  button.classList.add('text-emerald-600')
+  window.setTimeout(() => {
+    if (label) {
+      label.textContent = '마그넷'
+    }
+    button.classList.remove('text-emerald-600')
+  }, 1500)
+}
+
 function ResultRow({
   item,
   titleKo,
@@ -1351,11 +1419,17 @@ function ResultRow({
       </div>
       <div className="flex shrink-0 gap-2 pl-7 md:pl-0">
         {item.magnet ? (
-          <Button asChild variant="outline" size="sm">
-            <a href={item.magnet} title={item.title}>
-              <Magnet data-icon="inline-start" />
-              마그넷
-            </a>
+          <Button
+            variant="outline"
+            size="sm"
+            title={`${item.title} — 마그넷 주소를 클립보드로 복사합니다.`}
+            onClick={(event) => {
+              event.preventDefault()
+              copyMagnetToClipboard(item, event.currentTarget)
+            }}
+          >
+            <Magnet data-icon="inline-start" />
+            <span data-magnet-label>마그넷</span>
           </Button>
         ) : null}
         {item.torrent ? (
