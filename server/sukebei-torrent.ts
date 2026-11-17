@@ -1,3 +1,4 @@
+import { outboundFetch } from './outbound.ts'
 import { SearchError, SUKEBEI_ORIGIN } from './sukebei-search.ts'
 
 const TORRENT_TIMEOUT_MS = 20_000
@@ -29,7 +30,7 @@ export async function fetchTorrentFile(id: string, signal?: AbortSignal) {
   }
 
   const url = `${SUKEBEI_ORIGIN}/download/${parsed}.torrent`
-  const response = await fetch(url, {
+  const response = await outboundFetch(url, {
     headers: {
       Accept: 'application/x-bittorrent,application/octet-stream,*/*',
       'User-Agent':

@@ -5,6 +5,7 @@ import {
   Bookmark,
   CalendarPlus,
   Download,
+  Globe,
   ListTodo,
   LoaderCircle,
   Magnet,
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { PendingQbitDialog, QbitPromptDialog } from '@/components/qbit-dialogs'
+import { ProxySettingsDialog } from '@/components/proxy-settings-dialog'
 import { SavedQueriesDialog } from '@/components/saved-queries-dialog'
 import { categoryLabel } from '@/lib/categories'
 import {
@@ -132,6 +134,7 @@ export default function App() {
   const [promptIds, setPromptIds] = useState<number[]>([])
   const [qbitBusy, setQbitBusy] = useState(false)
   const [qbitError, setQbitError] = useState<string | null>(null)
+  const [proxyOpen, setProxyOpen] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [savedQueries, setSavedQueries] = useState<LastDownloadRecord[]>([])
   const [savedQueryCount, setSavedQueryCount] = useState(0)
@@ -846,6 +849,15 @@ export default function App() {
                 미추가 파일 다운로드
                 {pendingItems.length > 0 ? ` (${pendingItems.length})` : ''}
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="open-proxy-settings"
+                onClick={() => setProxyOpen(true)}
+              >
+                <Globe data-icon="inline-start" />
+                프록시 설정
+              </Button>
             </div>
           </div>
 
@@ -1229,6 +1241,7 @@ export default function App() {
         }
         onToggleWorking={(record) => void handleToggleWorking(record)}
       />
+      <ProxySettingsDialog open={proxyOpen} onClose={() => setProxyOpen(false)} />
     </div>
   )
 }

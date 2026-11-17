@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { outboundFetch } from './outbound.ts'
 
 const CHROME_TRANSLATE =
   'https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=ko'
@@ -104,7 +105,7 @@ function parseChromeResponse(data: unknown, count: number) {
 
 async function translateBatchChrome(texts: string[], signal?: AbortSignal) {
   const body = texts.map((text) => `q=${encodeURIComponent(text)}`).join('&')
-  const response = await fetch(CHROME_TRANSLATE, {
+  const response = await outboundFetch(CHROME_TRANSLATE, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -125,7 +126,9 @@ async function translateBatchChrome(texts: string[], signal?: AbortSignal) {
 }
 
 async function translateOneLingva(text: string, signal?: AbortSignal) {
-  const response = await fetch(`${LINGVA_TRANSLATE}${encodeURIComponent(text)}`, {
+  const response = await outboundFetch(
+    `${LINGVA_TRANSLATE}${encodeURIComponent(text)}`,
+    {
     headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
     signal: withTimeout(signal, 12_000),
   })

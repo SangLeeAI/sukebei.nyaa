@@ -11,6 +11,7 @@ import {
   parseTorrentId,
 } from './server/sukebei-torrent.ts'
 import { parseSaveItems, saveTorrentsToDownloads } from './server/save-torrents.ts'
+import { getProxyConfig, setProxyConfig } from './server/outbound.ts'
 import {
   deleteLastDownload,
   getLastDownload,
@@ -439,6 +440,42 @@ function localApiPlugin(): Plugin {
               count: countPendingTorrents(),
             })
           }
+          return
+        }
+
+        if (url.pathname === '/api/proxy') {
+          if (req.method === 'GET') {
+            try {
+              sendJson(res, 200, { config: getProxyConfig() })
+            } catch (cause) {
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '프록시 설정을 읽지 못했어요.'
+              sendJson(res, 500, { error: message })
+            }
+            return
+          }
+
+          if (req.method === 'PUT') {
+            try {
+              const parsed: unknown = JSON.parse((await readBody(req)) || '{}')
+              const source = (parsed ?? {}) as Record<string, unknown>
+              const config = setProxyConfig(source.mode, source.url)
+              sendJson(res, 200, { config })
+            } catch (cause) {
+              const message =
+                cause instanceof Error
+                  ? cause.message
+                  : '프록시 설정을 저장하지 못했어요.'
+              sendJson(res, 400, { error: message })
+            }
+            return
+          }
+
+          res.statusCode = 405
+          res.setHeader('Allow', 'GET, PUT')
+          res.end()
           return
         }
 

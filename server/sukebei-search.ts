@@ -1,4 +1,5 @@
 import { parse } from 'node-html-parser'
+import { outboundFetch } from './outbound.ts'
 import { resolveSince, sinceCutoffUnix } from './since.ts'
 
 export const SUKEBEI_ORIGIN = 'https://sukebei.nyaa.si'
@@ -159,7 +160,7 @@ async function fetchSearchPage(
     url.searchParams.set('p', String(page))
   }
 
-  const response = await fetch(url, {
+  const response = await outboundFetch(url, {
     headers: {
       Accept: 'text/html,application/xhtml+xml',
       'User-Agent':
